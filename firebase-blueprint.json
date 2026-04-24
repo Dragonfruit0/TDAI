@@ -1,0 +1,114 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile information",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "Firebase Auth UID"
+        },
+        "email": {
+          "type": "string",
+          "format": "email"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "photoURL": {
+          "type": "string",
+          "format": "uri"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "lastLoginAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "uid",
+        "email",
+        "createdAt"
+      ]
+    },
+    "Project": {
+      "title": "Project",
+      "description": "A generated UI project containing variants",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string",
+          "description": "The UID of the user who created this project"
+        },
+        "prompt": {
+          "type": "string",
+          "description": "The initial user prompt"
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "answers": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "variants": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "id": { "type": "string" },
+              "label": { "type": "string" },
+              "html": { "type": "string" },
+              "description": { "type": "string" }
+            },
+            "required": ["id", "label", "html", "description"]
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "usage": {
+          "type": "object",
+          "properties": {
+            "promptTokenCount": { "type": "integer" },
+            "candidatesTokenCount": { "type": "integer" },
+            "totalTokenCount": { "type": "integer" }
+          }
+        },
+        "cost": {
+          "type": "number"
+        }
+      },
+      "required": [
+        "userId",
+        "prompt",
+        "variants",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": {
+        "$ref": "#/entities/User"
+      },
+      "description": "Stores user profiles"
+    },
+    "/projects/{projectId}": {
+      "schema": {
+        "$ref": "#/entities/Project"
+      },
+      "description": "Stores generated UI projects"
+    }
+  }
+}
