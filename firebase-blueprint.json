@@ -27,6 +27,16 @@
         "lastLoginAt": {
           "type": "string",
           "format": "date-time"
+        },
+        "subscription": {
+          "type": "object",
+          "properties": {
+            "status": { "type": "string" },
+            "plan": { "type": "string" },
+            "billingCycle": { "type": "string" },
+            "createdAt": { "type": "string", "format": "date-time" }
+          },
+          "required": ["status", "plan"]
         }
       },
       "required": [

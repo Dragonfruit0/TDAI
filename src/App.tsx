@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowRight, ChevronLeft, ChevronRight, Sparkles, Loader2, X, User as UserIcon, LogOut, History, Download, MessageSquare, Send } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ChevronRight, Sparkles, Loader2, X, User as UserIcon, LogOut, History, Download, MessageSquare, Send, LayoutGrid, ShieldAlert, Lock, CreditCard, Users, TrendingUp, Coins, Activity, Eye, RefreshCw, Trash2, ArrowUpRight, CheckCircle } from 'lucide-react';
 import { AppView, UIVariant, UserProfile, Project, ChatMessage, UsageMetadata, DesignSuggestion } from './types.ts';
 import { generateFollowUpQuestions, generateUIVariants, modifyUI, generateDesignSuggestions } from './services/geminiService.ts';
 import { UIPreview } from './components/UIPreview.tsx';
 import { OnboardingTutorial } from './components/OnboardingTutorial.tsx';
 import DottedGlowBackground from './components/DottedGlowBackground.tsx';
+import { UpgradeModal } from './components/UpgradeModal.tsx';
 import { auth, db, googleProvider, signInWithPopup, signOut, doc, setDoc, getDoc, collection, addDoc, query, where, getDocs, orderBy, handleFirestoreError, OperationType } from './firebase.ts';
 import { onAuthStateChanged } from 'firebase/auth';
 
@@ -39,8 +40,38 @@ const App: React.FC = () => {
   const [userProjects, setUserProjects] = useState<Project[]>([]);
   const [isLoadingProjects, setIsLoadingProjects] = useState(false);
 
+  // Limits and Pro state
+  const [totalGenerations, setTotalGenerations] = useState<number>(0);
+  const [generationsToday, setGenerationsToday] = useState<number>(0);
+  const [isLoadingLimits, setIsLoadingLimits] = useState<boolean>(false);
+  const [showUpgradeModal, setShowUpgradeModal] = useState<boolean>(false);
+
   // Onboarding state
   const [showOnboarding, setShowOnboarding] = useState(false);
+
+  const refreshLimits = async (currentUser: UserProfile | null) => {
+    if (!currentUser) return;
+    setIsLoadingLimits(true);
+    try {
+      const q = query(collection(db, 'projects'), where('userId', '==', currentUser.uid));
+      const snap = await getDocs(q);
+      const projects: any[] = [];
+      snap.forEach(docSnap => {
+        projects.push(docSnap.data());
+      });
+      
+      const total = projects.length;
+      const todayStr = new Date().toDateString();
+      const today = projects.filter(p => p.createdAt && new Date(p.createdAt).toDateString() === todayStr).length;
+      
+      setTotalGenerations(total);
+      setGenerationsToday(today);
+    } catch (err) {
+      console.error("Error loading usage statistics", err);
+    } finally {
+      setIsLoadingLimits(false);
+    }
+  };
 
   useEffect(() => {
     if (view === AppView.BUILDER) {
@@ -63,22 +94,40 @@ const App: React.FC = () => {
           const userRef = doc(db, 'users', firebaseUser.uid);
           const userSnap = await getDoc(userRef);
           
+          const userDocData = userSnap.exists() ? userSnap.data() : {};
           const userData: UserProfile = {
             uid: firebaseUser.uid,
             email: firebaseUser.email || '',
-            displayName: firebaseUser.displayName || undefined,
-            photoURL: firebaseUser.photoURL || undefined,
-            createdAt: userSnap.exists() ? userSnap.data().createdAt : new Date().toISOString(),
+            createdAt: userDocData.createdAt || new Date().toISOString(),
             lastLoginAt: new Date().toISOString()
           };
 
+          if (firebaseUser.displayName) {
+            userData.displayName = firebaseUser.displayName;
+          } else if (userDocData.displayName) {
+            userData.displayName = userDocData.displayName;
+          }
+
+          if (firebaseUser.photoURL) {
+            userData.photoURL = firebaseUser.photoURL;
+          } else if (userDocData.photoURL) {
+            userData.photoURL = userDocData.photoURL;
+          }
+
+          if (userDocData.subscription) {
+            userData.subscription = userDocData.subscription;
+          }
+
           await setDoc(userRef, userData, { merge: true });
           setUser(userData);
+          refreshLimits(userData);
         } catch (error) {
           handleFirestoreError(error, OperationType.WRITE, `users/${firebaseUser.uid}`);
         }
       } else {
         setUser(null);
+        setTotalGenerations(0);
+        setGenerationsToday(0);
       }
       setIsAuthReady(true);
     });
@@ -129,6 +178,76 @@ const App: React.FC = () => {
   const [currentVariantIndex, setCurrentVariantIndex] = useState(0);
   const [currentProjectUsage, setCurrentProjectUsage] = useState<any>(null);
   const [currentProjectCost, setCurrentProjectCost] = useState<number>(0);
+
+  // Admin Dashboard State
+  const [adminUsers, setAdminUsers] = useState<UserProfile[]>([]);
+  const [adminProjects, setAdminProjects] = useState<Project[]>([]);
+  const [isAdminLoading, setIsAdminLoading] = useState(false);
+  const [selectedAdminUser, setSelectedAdminUser] = useState<UserProfile | null>(null);
+
+  const fetchAdminData = async () => {
+    setIsAdminLoading(true);
+    try {
+      let usersList: UserProfile[] = [];
+      try {
+        const usersSnap = await getDocs(collection(db, 'users'));
+        usersSnap.forEach(d => {
+          usersList.push(d.data() as UserProfile);
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.GET, 'users');
+      }
+      setAdminUsers(usersList);
+
+      let projectsList: Project[] = [];
+      try {
+        const projectsSnap = await getDocs(collection(db, 'projects'));
+        projectsSnap.forEach(d => {
+          projectsList.push({ id: d.id, ...d.data() } as Project);
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.GET, 'projects');
+      }
+      setAdminProjects(projectsList);
+    } catch (err) {
+      console.error("Error loading admin stats", err);
+    } finally {
+      setIsAdminLoading(false);
+    }
+  };
+
+  const handleToggleSubscription = async (userId: string, currentSub?: any) => {
+    try {
+      const userRef = doc(db, 'users', userId);
+      const isCurrentlyActive = currentSub?.status === 'active';
+      const newSub = {
+        status: isCurrentlyActive ? 'inactive' : 'active',
+        plan: isCurrentlyActive ? 'Free' : 'Pro',
+        billingCycle: 'monthly',
+        createdAt: new Date().toISOString()
+      };
+      
+      try {
+        await setDoc(userRef, { subscription: newSub }, { merge: true });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.UPDATE, `users/${userId}`);
+      }
+      
+      // Update local state instantly so user doesn't wait
+      setAdminUsers(prev => prev.map(u => u.uid === userId ? { ...u, subscription: newSub } : u));
+      if (selectedAdminUser?.uid === userId) {
+        setSelectedAdminUser(prev => prev ? { ...prev, subscription: newSub } : null);
+      }
+    } catch (err) {
+      console.error("Failed to update subscription status", err);
+    }
+  };
+
+  useEffect(() => {
+    if (view === AppView.ADMIN) {
+      fetchAdminData();
+    }
+  }, [view]);
 
   // Builder state
   const [isManualEditing, setIsManualEditing] = useState(false);
@@ -181,9 +300,18 @@ const App: React.FC = () => {
     return inputCost + outputCost;
   };
 
+  const isPro = user?.subscription?.status === 'active' || user?.email === 'thedesignai3@gmail.com';
+
   const handlePromptSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!prompt.trim()) return;
+    
+    if (!isPro) {
+      if (generationsToday >= 3) {
+        setShowUpgradeModal(true);
+        return;
+      }
+    }
     
     setView(AppView.GENERATING);
     setIsGeneratingUI(true);
@@ -211,6 +339,7 @@ const App: React.FC = () => {
             cost
           };
           await addDoc(collection(db, 'projects'), projectData);
+          await refreshLimits(user);
         } catch (dbError) {
           handleFirestoreError(dbError, OperationType.CREATE, 'projects');
         }
@@ -241,23 +370,56 @@ const App: React.FC = () => {
             <span className="text-zinc-500 font-normal text-[10px]">by Anqair</span>
           </div>
         </div>
-        <div>
+        <div className="flex items-center gap-3 text-white">
           {isAuthReady && (
             user ? (
-              <button 
-                onClick={() => {
-                  fetchUserProjects();
-                  setView(AppView.PROFILE);
-                }}
-                className="flex items-center gap-2 bg-white/10 hover:bg-white/20 transition-colors px-4 py-2 rounded-full text-sm font-medium border border-white/10"
-              >
-                {user.photoURL ? (
-                  <img src={user.photoURL} alt="Profile" className="w-6 h-6 rounded-full" referrerPolicy="no-referrer" />
-                ) : (
-                  <UserIcon className="w-4 h-4" />
+              <>
+                {/* Limits & Pro tag */}
+                <span className={`px-3 py-1.5 rounded-full text-xs font-bold font-mono border tracking-wide uppercase flex items-center gap-1.5 leading-none ${isPro ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 'bg-zinc-900 text-zinc-400 border-white/5'}`}>
+                  {isPro ? (
+                    <>
+                      <Sparkles className="w-3 h-3 text-blue-400 fill-blue-400/20" />
+                      Pro Plan
+                    </>
+                  ) : (
+                    `Limit (${generationsToday}/3 today)`
+                  )}
+                </span>
+
+                {!isPro && (
+                  <button
+                    onClick={() => setShowUpgradeModal(true)}
+                    className="bg-gradient-to-r from-purple-500 via-blue-500 to-emerald-500 hover:opacity-90 text-white px-4 py-2 rounded-full text-xs font-extrabold transition-all hover:scale-[1.02] active:scale-[0.98] shadow-lg flex items-center gap-1.5"
+                  >
+                    <Sparkles className="w-3.5 h-3.5" />
+                    <span>Get Pro</span>
+                  </button>
                 )}
-                <span>{user.displayName || 'Profile'}</span>
-              </button>
+
+                {user.email === 'thedesignai3@gmail.com' && (
+                  <button
+                    onClick={() => setView(AppView.ADMIN)}
+                    className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-black px-4 py-2 rounded-full text-sm font-bold shadow-lg transition-all hover:scale-[1.02] active:scale-[0.98]"
+                  >
+                    <LayoutGrid className="w-4 h-4" />
+                    <span>Admin Dashboard</span>
+                  </button>
+                )}
+                <button 
+                  onClick={() => {
+                    fetchUserProjects();
+                    setView(AppView.PROFILE);
+                  }}
+                  className="flex items-center gap-2 bg-white/10 hover:bg-white/20 transition-colors px-4 py-2 rounded-full text-sm font-medium border border-white/10"
+                >
+                  {user.photoURL ? (
+                    <img src={user.photoURL} alt="Profile" className="w-6 h-6 rounded-full" referrerPolicy="no-referrer" />
+                  ) : (
+                    <UserIcon className="w-4 h-4" />
+                  )}
+                  <span>{user.displayName || 'Profile'}</span>
+                </button>
+              </>
             ) : (
               <button 
                 onClick={handleSignIn}
@@ -556,10 +718,17 @@ const App: React.FC = () => {
           <div className="flex items-center gap-4">
             <button 
               id="manual-edit-button"
-              onClick={() => setIsManualEditing(!isManualEditing)} 
-              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors ${isManualEditing ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-white/5 hover:bg-white/10 text-white border border-white/10'}`}
+              onClick={() => {
+                if (!isPro && totalGenerations >= 6) {
+                  setShowUpgradeModal(true);
+                } else {
+                  setIsManualEditing(!isManualEditing);
+                }
+              }} 
+              className={`px-4 py-2 rounded-full text-sm font-medium transition-colors flex items-center gap-1.5 ${isManualEditing ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-white/5 hover:bg-white/10 text-white border border-white/10'}`}
             >
-              {isManualEditing ? 'Done Editing' : 'Manual Edit'}
+              {!isPro && totalGenerations >= 6 && <Lock className="w-3.5 h-3.5 text-yellow-500 fill-yellow-500/10" />}
+              <span>{isManualEditing ? 'Done Editing' : 'Manual Edit'}</span>
             </button>
             <button 
               id="export-button"
@@ -643,12 +812,35 @@ const App: React.FC = () => {
       </div>
 
       {/* Chat Sidebar */}
-      <div id="chat-sidebar" className="w-96 border-l border-white/10 bg-[#0a0a0a] flex flex-col h-full shrink-0">
+      <div id="chat-sidebar" className="w-96 border-l border-white/10 bg-[#0a0a0a] flex flex-col h-full shrink-0 relative">
         <div className="p-4 border-b border-white/10 flex items-center gap-2">
           <MessageSquare className="w-5 h-5 text-emerald-400" />
           <h3 className="font-bold">Design Assistant</h3>
         </div>
         
+        {/* Lock Overlay for Free tier >= 6 generations */}
+        {!isPro && totalGenerations >= 6 ? (
+          <div className="absolute inset-x-0 bottom-0 top-14 bg-black/95 backdrop-blur-md z-40 flex flex-col items-center justify-center p-6 text-center">
+            <div className="w-14 h-14 bg-zinc-900 border border-white/10 rounded-2xl flex items-center justify-center mb-6 shadow-2xl">
+              <Sparkles className="w-6 h-6 text-yellow-500 animate-pulse" />
+            </div>
+            <h4 className="text-lg font-black tracking-tight text-white mb-2">Upgrade to Pro Required</h4>
+            <p className="text-zinc-405 text-xs leading-relaxed mb-6 max-w-[240px]">
+              AI Design Chatbot and Manual edits features are available exclusively for Pro plan users starting from your 6th generation.
+            </p>
+            <div className="text-[11px] bg-white/5 border border-white/10 px-3 py-1.5 rounded-full font-mono text-zinc-300 mb-8 select-none">
+              Generated: <span className="font-bold text-emerald-400">{totalGenerations}</span> / 5 Free limit
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowUpgradeModal(true)}
+              className="w-full bg-gradient-to-r from-purple-500 via-blue-500 to-emerald-500 text-white py-3 rounded-xl font-bold text-xs tracking-wider uppercase shadow-xl hover:scale-[1.02] active:scale-[0.98] transition-all cursor-pointer"
+            >
+              Get Pro for $14 USD
+            </button>
+          </div>
+        ) : null}
+
         <div className="flex-1 overflow-y-auto p-4 flex flex-col gap-4">
           {chatMessages.length === 0 ? (
             <div className="text-center text-zinc-500 text-sm mt-10">
@@ -711,12 +903,23 @@ const App: React.FC = () => {
             <span className="font-bold text-xl tracking-tighter">Your Workspace</span>
           </div>
         </div>
-        <button 
-          onClick={handleSignOut}
-          className="flex items-center gap-2 text-zinc-400 hover:text-red-400 transition-colors text-sm font-medium"
-        >
-          <LogOut className="w-4 h-4" /> Sign Out
-        </button>
+        <div className="flex items-center gap-3">
+          {user?.email === 'thedesignai3@gmail.com' && (
+            <button
+              onClick={() => setView(AppView.ADMIN)}
+              className="flex items-center gap-2 bg-emerald-500 hover:bg-emerald-600 text-black px-4 py-2 rounded-full text-xs font-bold shadow-lg transition-all hover:scale-[1.02] active:scale-[0.98]"
+            >
+              <LayoutGrid className="w-3.5 h-3.5" />
+              <span>Admin Dashboard</span>
+            </button>
+          )}
+          <button 
+            onClick={handleSignOut}
+            className="flex items-center gap-2 text-zinc-400 hover:text-red-400 transition-colors text-sm font-medium"
+          >
+            <LogOut className="w-4 h-4" /> Sign Out
+          </button>
+        </div>
       </header>
 
       <main className="z-10 w-full max-w-5xl px-6 py-12 flex flex-col gap-12">
@@ -783,11 +986,6 @@ const App: React.FC = () => {
                       <div className="flex items-center gap-2 text-[10px] font-mono text-zinc-500">
                         <span className="bg-black/50 px-2 py-1 rounded-md">{project.variants.length} Variants</span>
                       </div>
-                      {project.cost !== undefined && (
-                        <div className="text-[10px] font-mono text-emerald-400/80">
-                          ${project.cost.toFixed(4)}
-                        </div>
-                      )}
                     </div>
                   </div>
               ))}
@@ -798,6 +996,385 @@ const App: React.FC = () => {
     </div>
   );
 
+  const renderAdmin = () => {
+    // 1. Calculations
+    const totalUsers = adminUsers.length;
+    
+    // Active users: login within 7 days
+    const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const activeUsersCount = adminUsers.filter(u => u.lastLoginAt ? new Date(u.lastLoginAt).getTime() > sevenDaysAgo : false).length;
+    
+    // Active subscriptions: plan status 'active' (or admin since designai3 is active Pro by default)
+    const activeSubsCount = adminUsers.filter(u => u.subscription?.status === 'active' || u.email === 'thedesignai3@gmail.com').length;
+    
+    // API Costs
+    const totalCost = adminProjects.reduce((sum, p) => sum + (p.cost || 0), 0);
+    const totalTokens = adminProjects.reduce((sum, p) => sum + (p.usage?.totalTokenCount || 0), 0);
+    const totalPrompt = adminProjects.reduce((sum, p) => sum + (p.usage?.promptTokenCount || 0), 0);
+    const totalCandidates = adminProjects.reduce((sum, p) => sum + (p.usage?.candidatesTokenCount || 0), 0);
+
+    // Group stats by user id
+    const userStats: Record<string, { projectsCount: number; cost: number; promptTokens: number; candidatesTokens: number; totalTokens: number }> = {};
+    adminUsers.forEach(u => {
+      userStats[u.uid] = { projectsCount: 0, cost: 0, promptTokens: 0, candidatesTokens: 0, totalTokens: 0 };
+    });
+    adminProjects.forEach(p => {
+      if (!userStats[p.userId]) {
+        userStats[p.userId] = { projectsCount: 0, cost: 0, promptTokens: 0, candidatesTokens: 0, totalTokens: 0 };
+      }
+      userStats[p.userId].projectsCount += 1;
+      userStats[p.userId].cost += (p.cost || 0);
+      userStats[p.userId].promptTokens += (p.usage?.promptTokenCount || 0);
+      userStats[p.userId].candidatesTokens += (p.usage?.candidatesTokenCount || 0);
+      userStats[p.userId].totalTokens += (p.usage?.totalTokenCount || 0);
+    });
+
+    // Detailed projects for selected user
+    const selectedUserProjects = selectedAdminUser 
+      ? adminProjects.filter(p => p.userId === selectedAdminUser.uid)
+      : [];
+
+    return (
+      <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center relative overflow-hidden pb-12">
+        <DottedGlowBackground />
+        
+        {/* Header */}
+        <header className="w-full p-6 flex justify-between items-center z-50 border-b border-white/10 bg-black/50 backdrop-blur-md shrink-0">
+          <div className="flex items-center gap-4">
+            <button 
+              onClick={() => {
+                setSelectedAdminUser(null);
+                setView(AppView.LANDING);
+              }}
+              className="text-zinc-400 hover:text-white transition-colors flex items-center gap-2 text-sm font-medium"
+            >
+              <ChevronLeft className="w-5 h-5" /> Back to App
+            </button>
+            <div className="flex items-center gap-3">
+              <img src="/logo.jpeg" alt="Logo" className="w-8 h-8 rounded-lg shadow-lg" />
+              <div className="flex flex-col">
+                <span className="font-bold text-lg tracking-tighter leading-none">Console</span>
+                <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-widest leading-none mt-1">Admin Dashboard</span>
+              </div>
+            </div>
+          </div>
+          
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={fetchAdminData}
+              disabled={isAdminLoading}
+              className="flex items-center gap-2 bg-white/5 border border-white/10 hover:bg-white/10 text-zinc-300 hover:text-white transition-all px-4 py-2 rounded-full text-xs font-semibold disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${isAdminLoading ? 'animate-spin' : ''}`} />
+              <span>Refresh Stats</span>
+            </button>
+            <button 
+              onClick={() => {
+                setSelectedAdminUser(null);
+                setView(AppView.LANDING);
+              }}
+              className="flex items-center gap-2 bg-white text-black hover:bg-zinc-200 transition-colors px-4 py-2 rounded-full text-xs font-bold"
+            >
+              Exit Console
+            </button>
+          </div>
+        </header>
+
+        <main className="z-10 w-full max-w-7xl px-6 py-10 flex flex-col gap-8 flex-1">
+          {isAdminLoading && adminUsers.length === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center py-24">
+              <Loader2 className="w-10 h-10 animate-spin text-emerald-400 mb-4" />
+              <p className="text-zinc-400 text-sm">Loading dynamic workspace telemetry...</p>
+            </div>
+          ) : (
+            <>
+              {/* Telemetry Bento Grid */}
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+                
+                {/* 1. Cost */}
+                <div className="bg-zinc-950/40 backdrop-blur-xl border border-white/5 rounded-3xl p-6 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                    <Coins className="w-16 h-16 text-emerald-400" />
+                  </div>
+                  <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono block mb-2">Total Api Cost</span>
+                  <div className="text-3xl md:text-4xl font-black text-emerald-400 tracking-tight font-mono leading-none">
+                    ${totalCost.toFixed(3)}
+                  </div>
+                  <span className="text-[10px] text-zinc-500 font-mono block mt-3">Calculated from model prices</span>
+                </div>
+
+                {/* 2. Registered & Active Users */}
+                <div className="bg-zinc-950/40 backdrop-blur-xl border border-white/5 rounded-3xl p-6 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                    <Users className="w-16 h-16 text-purple-400" />
+                  </div>
+                  <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono block mb-2">Active Users (7d)</span>
+                  <div className="text-3xl md:text-4xl font-black text-white tracking-tight leading-none flex items-baseline gap-2">
+                    <span>{activeUsersCount}</span>
+                    <span className="text-zinc-500 text-sm font-light font-mono">/ {totalUsers} total</span>
+                  </div>
+                  <span className="text-[10px] text-zinc-500 font-mono block mt-3">Users seen this week</span>
+                </div>
+
+                {/* 3. Subscriptions */}
+                <div className="bg-zinc-950/40 backdrop-blur-xl border border-white/5 rounded-3xl p-6 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                    <CreditCard className="w-16 h-16 text-blue-400" />
+                  </div>
+                  <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono block mb-2">Active Pro Plans</span>
+                  <div className="text-3xl md:text-4xl font-black text-blue-400 tracking-tight leading-none flex items-baseline gap-2 font-mono">
+                    <span>{activeSubsCount}</span>
+                    <span className="text-zinc-500 text-sm font-light">active</span>
+                  </div>
+                  <span className="text-[10px] text-zinc-500 font-mono block mt-3">Toggled in administration panel</span>
+                </div>
+
+                {/* 4. Token metrics */}
+                <div className="bg-zinc-950/40 backdrop-blur-xl border border-white/5 rounded-3xl p-6 relative overflow-hidden group">
+                  <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
+                    <Activity className="w-16 h-16 text-yellow-500" />
+                  </div>
+                  <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono block mb-2">Token Usage Balance</span>
+                  <div className="text-3xl md:text-4xl font-black text-yellow-500 tracking-tight leading-none font-mono">
+                    {(totalTokens / 1000).toFixed(0)}k
+                  </div>
+                  <div className="text-[10px] text-zinc-500 font-mono mt-3 flex justify-between">
+                    <span>In: {(totalPrompt / 1000).toFixed(0)}k</span>
+                    <span>Out: {(totalCandidates / 1000).toFixed(0)}k</span>
+                  </div>
+                </div>
+
+              </div>
+
+              {/* User management and Detail Panel */}
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
+                
+                {/* Admin Users Table (Col span 12 or 7 if a user is selected) */}
+                <div className={`bg-zinc-950/25 border border-white/5 rounded-3xl p-6 backdrop-blur-md overflow-hidden transition-all duration-300 ${selectedAdminUser ? 'lg:col-span-6' : 'lg:col-span-12'}`}>
+                  <div className="flex items-center justify-between mb-6 pb-2 border-b border-white/5">
+                    <div className="flex items-center gap-2">
+                      <Users className="w-5 h-5 text-zinc-400" />
+                      <h3 className="text-lg font-bold">User API Usage Records</h3>
+                    </div>
+                    <span className="text-xs bg-white/5 px-2.5 py-1 rounded-full text-zinc-400 font-mono">
+                      {adminUsers.length} Users Found
+                    </span>
+                  </div>
+
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-left text-sm whitespace-nowrap">
+                      <thead>
+                        <tr className="text-zinc-500 text-xs font-mono uppercase tracking-wider border-b border-white/5">
+                          <th className="pb-3 font-medium">Identity</th>
+                          <th className="pb-3 font-medium">Plans / Status</th>
+                          <th className="pb-3 font-medium text-right">Projects</th>
+                          <th className="pb-3 font-medium text-right font-mono">Usage Cost</th>
+                          <th className="pb-3 font-medium text-center">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-white/5">
+                        {adminUsers.map(userItem => {
+                          const stats = userStats[userItem.uid] || { projectsCount: 0, cost: 0, totalTokens: 0 };
+                          const isActivePro = userItem.subscription?.status === 'active' || userItem.email === 'thedesignai3@gmail.com';
+                          const isCurrentlySelected = selectedAdminUser?.uid === userItem.uid;
+
+                          return (
+                            <tr 
+                              key={userItem.uid} 
+                              className={`hover:bg-white/2 transition-colors group ${isCurrentlySelected ? 'bg-white/5' : ''}`}
+                            >
+                              <td className="py-4 pr-4">
+                                <div className="flex items-center gap-3">
+                                  {userItem.photoURL ? (
+                                    <img src={userItem.photoURL} alt="" className="w-9 h-9 rounded-full border border-white/10" referrerPolicy="no-referrer" />
+                                  ) : (
+                                    <div className="w-9 h-9 rounded-full bg-zinc-800 flex items-center justify-center border border-white/10 text-xs uppercase font-bold text-zinc-400">
+                                      {(userItem.displayName || userItem.email || '?')[0]}
+                                    </div>
+                                  )}
+                                  <div className="flex flex-col flex-wrap max-w-[200px]">
+                                    <span className="font-semibold text-zinc-200 group-hover:text-emerald-400 transition-colors truncate">
+                                      {userItem.displayName || 'No Name'}
+                                    </span>
+                                    <span className="text-zinc-500 text-xs font-mono truncate">
+                                      {userItem.email}
+                                    </span>
+                                  </div>
+                                </div>
+                              </td>
+                              
+                              <td className="py-4 pr-4">
+                                <div className="flex items-center gap-2">
+                                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-bold tracking-wider uppercase leading-none ${isActivePro ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-zinc-800/80 text-zinc-500 border border-white/5'}`}>
+                                    {isActivePro ? 'Pro Active' : 'Free tier'}
+                                  </span>
+                                  <button
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleToggleSubscription(userItem.uid, userItem.subscription);
+                                    }}
+                                    className="text-[10px] bg-white/5 hover:bg-white/10 text-zinc-400 hover:text-white px-2 py-1 rounded transition-colors border border-white/5 uppercase font-medium"
+                                  >
+                                    Toggle Pro
+                                  </button>
+                                </div>
+                              </td>
+
+                              <td className="py-4 pr-4 text-right font-mono font-bold text-zinc-300">
+                                {stats.projectsCount}
+                              </td>
+
+                              <td className="py-4 pr-4 text-right">
+                                <span className="font-mono text-emerald-400 block font-bold text-sm">
+                                  ${stats.cost.toFixed(4)}
+                                </span>
+                                <span className="text-[10px] text-zinc-500 block font-mono">
+                                  {(stats.totalTokens / 1000).toFixed(0)}k tkns
+                                </span>
+                              </td>
+
+                              <td className="py-4 text-center">
+                                <button
+                                  onClick={() => setSelectedAdminUser(userItem)}
+                                  className="inline-flex items-center gap-1.5 bg-zinc-900 hover:bg-zinc-800 text-zinc-300 hover:text-white px-3 py-1.5 rounded-xl text-xs font-medium border border-white/10 transition-colors"
+                                >
+                                  <Eye className="w-3.5 h-3.5 text-emerald-400" />
+                                  <span>Inspect</span>
+                                </button>
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                {/* Selected User Logs Subscreen (Col span 6) */}
+                {selectedAdminUser && (
+                  <div className="lg:col-span-6 bg-zinc-950/40 border border-white/5 rounded-3xl p-6 backdrop-blur-xl flex flex-col gap-6 relative">
+                    <button 
+                      onClick={() => setSelectedAdminUser(null)}
+                      className="absolute top-6 right-6 text-zinc-500 hover:text-white transition-colors"
+                      title="Close"
+                    >
+                      <X className="w-5 h-5" />
+                    </button>
+
+                    <div className="flex items-center gap-4 pb-4 border-b border-white/5">
+                      {selectedAdminUser.photoURL ? (
+                        <img src={selectedAdminUser.photoURL} alt="" className="w-12 h-12 rounded-full border-2 border-white/10" referrerPolicy="no-referrer" />
+                      ) : (
+                        <div className="w-12 h-12 rounded-full bg-zinc-800 flex items-center justify-center border border-white/10 text-lg uppercase font-bold text-zinc-400">
+                          {selectedAdminUser.displayName?.[0] || selectedAdminUser.email[0]}
+                        </div>
+                      )}
+                      <div className="flex flex-col">
+                        <span className="text-zinc-500 text-[10px] font-mono uppercase tracking-widest block leading-none mb-1">Inspecting API Session Logs</span>
+                        <h3 className="text-lg font-bold leading-none">{selectedAdminUser.displayName || 'Unnamed user'}</h3>
+                        <p className="text-zinc-400 text-xs font-mono mt-1">{selectedAdminUser.email}</p>
+                      </div>
+                    </div>
+
+                    {/* Quick user totals bento */}
+                    <div className="grid grid-cols-3 gap-2 bg-black/40 border border-white/5 rounded-2xl p-4">
+                      <div>
+                        <span className="text-[9px] text-zinc-505 uppercase font-mono block">Total Projects</span>
+                        <span className="text-sm font-bold font-mono text-zinc-200">{selectedUserProjects.length}</span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-zinc-505 uppercase font-mono block font-bold">Sum Incurred</span>
+                        <span className="text-sm font-black font-mono text-emerald-400">
+                          ${(userStats[selectedAdminUser.uid]?.cost || 0).toFixed(4)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-zinc-505 uppercase font-mono block">Total Tokens</span>
+                        <span className="text-sm font-bold font-mono text-zinc-200">
+                          {((userStats[selectedAdminUser.uid]?.totalTokens || 0) / 1000).toFixed(0)}k
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Detailed Prompt entries list */}
+                    <div className="flex flex-col gap-4">
+                      <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider font-mono">Prompt & API Run Log History</h4>
+                      
+                      {selectedUserProjects.length === 0 ? (
+                        <div className="text-center py-10 bg-black/20 rounded-2xl border border-white/5 text-zinc-505 text-sm">
+                          No query logs registered for this user in workspace records.
+                        </div>
+                      ) : (
+                        <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                          {selectedUserProjects.map(proj => {
+                            const dateStr = new Date(proj.createdAt).toLocaleString();
+                            const variantsCount = proj.variants?.length || 0;
+                            const promptTitle = proj.prompt;
+                            const costVal = proj.cost || 0;
+                            const tPrompt = proj.usage?.promptTokenCount || 0;
+                            const tCandidates = proj.usage?.candidatesTokenCount || 0;
+
+                            return (
+                              <div key={proj.id} className="bg-black/30 border border-white/5 rounded-xl p-4 hover:border-white/10 transition-colors flex flex-col gap-3 relative group">
+                                <div className="flex justify-between items-start gap-4">
+                                  <div className="flex-1">
+                                    <span className="text-[9px] text-zinc-550 font-mono block mb-1">Prompt Query Run: {dateStr}</span>
+                                    <p className="text-xs text-white font-medium line-clamp-2 md:leading-relaxed" title={promptTitle}>
+                                      "{promptTitle}"
+                                    </p>
+                                  </div>
+
+                                  <button
+                                    onClick={() => {
+                                      setVariants(proj.variants);
+                                      setCurrentVariantIndex(0);
+                                      setCurrentProjectUsage(proj.usage || null);
+                                      setCurrentProjectCost(proj.cost || 0);
+                                      setView(AppView.PREVIEW);
+                                    }}
+                                    className="shrink-0 flex items-center gap-1 bg-white/5 hover:bg-emerald-500 hover:text-black hover:border-emerald-600 border border-white/10 text-zinc-300 px-2 py-1 rounded text-[10px] font-bold transition-all"
+                                    title="Examine live rendered artifact variants"
+                                  >
+                                    <span>View UI</span>
+                                    <ArrowUpRight className="w-3 h-3" />
+                                  </button>
+                                </div>
+
+                                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-white/5 text-[10px] font-mono text-zinc-500">
+                                  <div>
+                                    <span className="block text-[8px] uppercase text-zinc-500">Cost</span>
+                                    <span className="text-emerald-400 font-bold">${costVal.toFixed(4)}</span>
+                                  </div>
+                                  <div>
+                                    <span className="block text-[8px] uppercase text-zinc-500">Tokens</span>
+                                    <span className="text-zinc-300">{tPrompt + tCandidates} total</span>
+                                  </div>
+                                  <div>
+                                    <span className="block text-[8px] uppercase text-zinc-500">Variants</span>
+                                    <span className="text-zinc-300">{variantsCount} synthesized</span>
+                                  </div>
+                                </div>
+                                <div className="text-[9px] text-zinc-600 font-mono text-right mt-1">
+                                  In: {tPrompt} tkns / Out: {tCandidates} tkns
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+
+                  </div>
+                )}
+
+              </div>
+            </>
+          )}
+        </main>
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-black font-sans">
       {view === AppView.LANDING && renderLanding()}
@@ -805,8 +1382,26 @@ const App: React.FC = () => {
       {view === AppView.PREVIEW && renderPreview()}
       {view === AppView.BUILDER && renderBuilder()}
       {view === AppView.PROFILE && renderProfile()}
+      {view === AppView.ADMIN && renderAdmin()}
 
       {showOnboarding && <OnboardingTutorial onComplete={handleOnboardingComplete} />}
+
+      <AnimatePresence>
+        {showUpgradeModal ? (
+          <UpgradeModal 
+            user={user}
+            onClose={() => setShowUpgradeModal(false)}
+            onSuccess={(newSub) => {
+              if (user) {
+                setUser({
+                  ...user,
+                  subscription: newSub
+                });
+              }
+            }}
+          />
+        ) : null}
+      </AnimatePresence>
 
       {/* Global Branding Credit */}
       <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 opacity-40 hover:opacity-100 transition-opacity pointer-events-none sm:pointer-events-auto">

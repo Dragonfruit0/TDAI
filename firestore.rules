@@ -37,6 +37,13 @@ service cloud.firestore {
        return request.auth != null;
     }
     
+    // Check if the user is a systems administrator
+    function isAdmin() {
+       return isAuthenticated() && 
+              request.auth.token.email == 'thedesignai3@gmail.com' && 
+              request.auth.token.email_verified == true;
+    }
+    
     // Check if user owns the resource (for user-owned documents)
     function isOwner(userId) {
        return isAuthenticated() && request.auth.uid == userId;
@@ -86,13 +93,21 @@ service cloud.firestore {
     // ===============================================================
 
     function isValidUser(data) {
-      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'createdAt', 'lastLoginAt']) &&
+      return hasOnlyAllowedFields(['uid', 'email', 'displayName', 'photoURL', 'createdAt', 'lastLoginAt', 'subscription']) &&
              data.uid is string && data.uid.size() > 0 && data.uid.size() < 128 &&
              data.email is string && isValidEmail(data.email) && data.email.size() < 256 &&
              (!('displayName' in data) || (data.displayName is string && data.displayName.size() < 100)) &&
              (!('photoURL' in data) || (data.photoURL is string && data.photoURL.size() < 2048)) &&
              data.createdAt is string && isValidDateString(data.createdAt) &&
-             (!('lastLoginAt' in data) || (data.lastLoginAt is string && isValidDateString(data.lastLoginAt)));
+             (!('lastLoginAt' in data) || (data.lastLoginAt is string && isValidDateString(data.lastLoginAt))) &&
+             (!('subscription' in data) || (
+               data.subscription is map &&
+               data.subscription.keys().hasAll(['status', 'plan']) &&
+               data.subscription.status is string &&
+               data.subscription.plan is string &&
+               (!('billingCycle' in data.subscription) || data.subscription.billingCycle is string) &&
+               (!('createdAt' in data.subscription) || data.subscription.createdAt is string)
+             ));
     }
 
     function isValidProject(data) {
@@ -112,26 +127,27 @@ service cloud.firestore {
     // ===============================================================
 
     match /users/{userId} {
-      allow read: if isOwner(userId);
+      allow read: if isOwner(userId) || isAdmin();
       allow create: if isOwner(userId) && 
                        hasRequiredFields(['uid', 'email', 'createdAt']) && 
                        isValidUser(request.resource.data) &&
                        request.resource.data.uid == userId;
-      allow update: if isOwner(userId) && 
+      allow update: if (isOwner(userId) && 
                        isValidUser(request.resource.data) &&
                        uidNotModified() &&
-                       request.resource.data.createdAt == resource.data.createdAt;
-      allow delete: if false; // Users cannot delete their profile directly
+                       request.resource.data.createdAt == resource.data.createdAt) ||
+                       (isAdmin() && isValidUser(request.resource.data));
+      allow delete: if isAdmin();
     }
 
     match /projects/{projectId} {
-      allow read: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow read: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
       allow create: if isAuthenticated() && 
                        hasRequiredFields(['userId', 'prompt', 'variants', 'createdAt']) &&
                        isValidProject(request.resource.data) &&
                        request.resource.data.userId == request.auth.uid;
-      allow update: if false; // Projects are immutable once created
-      allow delete: if isAuthenticated() && resource.data.userId == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
     }
   }
 }

@@ -4,7 +4,8 @@ export enum AppView {
   GENERATING = 'GENERATING',
   PREVIEW = 'PREVIEW',
   PROFILE = 'PROFILE',
-  BUILDER = 'BUILDER'
+  BUILDER = 'BUILDER',
+  ADMIN = 'ADMIN'
 }
 
 export interface ChatMessage {
@@ -52,4 +53,10 @@ export interface UserProfile {
   photoURL?: string;
   createdAt: string;
   lastLoginAt?: string;
+  subscription?: {
+    status: string;
+    plan: string;
+    billingCycle?: string;
+    createdAt?: string;
+  };
 }
