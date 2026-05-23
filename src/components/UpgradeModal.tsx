@@ -53,7 +53,7 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ user, onClose }) => 
           return;
         }
         throw new Error(
-          'Stripe checkout session API is offline or not configured on this custom domain. If you are hosting a static front-end page, you can easily activate your account subscription from the Admin tab inside this workspace, or specify a custom Stripe Payment Link (using VITE_STRIPE_PAYMENT_LINK in .env).'
+          'Checkout is temporarily unavailable on this workspace. Please check your network connection or try again later.'
         );
       }
 

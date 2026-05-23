@@ -1,12 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowRight, ChevronLeft, ChevronRight, Sparkles, Loader2, X, User as UserIcon, LogOut, History, Download, MessageSquare, Send, LayoutGrid, ShieldAlert, Lock, CreditCard, Users, TrendingUp, Coins, Activity, Eye, RefreshCw, Trash2, ArrowUpRight, CheckCircle } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ChevronRight, Sparkles, Loader2, X, User as UserIcon, LogOut, History, Download, MessageSquare, Send, LayoutGrid, ShieldAlert, Lock, CreditCard, Users, TrendingUp, Coins, Activity, Eye, RefreshCw, Trash2, ArrowUpRight, CheckCircle, Palette } from 'lucide-react';
 import { AppView, UIVariant, UserProfile, Project, ChatMessage, UsageMetadata, DesignSuggestion } from './types.ts';
 import { generateFollowUpQuestions, generateUIVariants, modifyUI, generateDesignSuggestions } from './services/geminiService.ts';
 import { UIPreview } from './components/UIPreview.tsx';
 import { OnboardingTutorial } from './components/OnboardingTutorial.tsx';
 import DottedGlowBackground from './components/DottedGlowBackground.tsx';
 import { UpgradeModal } from './components/UpgradeModal.tsx';
+import { ApiKeyErrorModal } from './components/ApiKeyErrorModal.tsx';
 import { auth, db, googleProvider, signInWithPopup, signOut, doc, setDoc, getDoc, collection, addDoc, query, where, getDocs, orderBy, handleFirestoreError, OperationType } from './firebase.ts';
 import { onAuthStateChanged } from 'firebase/auth';
 
@@ -45,6 +46,7 @@ const App: React.FC = () => {
   const [generationsToday, setGenerationsToday] = useState<number>(0);
   const [isLoadingLimits, setIsLoadingLimits] = useState<boolean>(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState<boolean>(false);
+  const [apiKeyErrorDetails, setApiKeyErrorDetails] = useState<string | null>(null);
 
   // Onboarding state
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -313,10 +315,26 @@ const App: React.FC = () => {
   const [chatInput, setChatInput] = useState('');
   const [isChatGenerating, setIsChatGenerating] = useState(false);
 
+  // Multi-page state system
+  const [pages, setPages] = useState<{ name: string; html: string }[]>([
+    { name: 'Home', html: '' }
+  ]);
+  const [activePageIndex, setActivePageIndex] = useState<number>(0);
+  
+  // Track active index in a Ref to safeguard event listener captures
+  const activePageIndexRef = useRef(0);
+  useEffect(() => {
+    activePageIndexRef.current = activePageIndex;
+  }, [activePageIndex]);
+
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === 'UI_EDITED' && event.data.html) {
-        setBuilderHtml(event.data.html);
+        const newHtml = event.data.html;
+        setBuilderHtml(newHtml);
+        setPages(prev => prev.map((p, idx) => 
+          idx === activePageIndexRef.current ? { ...p, html: newHtml } : p
+        ));
       } else if (event.data?.type === 'ELEMENT_SELECTED') {
         setSelectedElement({
           tagName: event.data.tagName,
@@ -363,6 +381,54 @@ const App: React.FC = () => {
     if (iframe?.contentWindow) {
       iframe.contentWindow.postMessage({ type: 'UPDATE_TEXT', text: newText }, '*');
     }
+  };
+
+  const parseHexColor = (classes: string, type: 'bg' | 'text' | 'border'): string => {
+    // Search for explicit custom style wrapper [color] (e.g., bg-[#ff00bb] or text-[#123123])
+    const regex = new RegExp(`${type}-\\[(#[a-fA-F0-9]{3,8}|[^]]+)\\]`);
+    const match = classes.match(regex);
+    if (match) {
+      return match[1];
+    }
+    
+    // Fallback dictionary for common standard Tailwind color classes
+    if (classes.includes(`${type}-transparent`)) return 'transparent';
+    if (classes.includes(`${type}-black`)) return '#000000';
+    if (classes.includes(`${type}-white`)) return '#ffffff';
+    if (classes.includes(`${type}-zinc-900`)) return '#18181b';
+    if (classes.includes(`${type}-zinc-800`)) return '#27272a';
+    if (classes.includes(`${type}-zinc-700`)) return '#3f3f46';
+    if (classes.includes(`${type}-zinc-600`)) return '#52525b';
+    if (classes.includes(`${type}-zinc-500`)) return '#71717a';
+    if (classes.includes(`${type}-zinc-400`)) return '#a1a1aa';
+    if (classes.includes(`${type}-zinc-300`)) return '#d4d4d8';
+    if (classes.includes(`${type}-emerald-500`)) return '#10b981';
+    if (classes.includes(`${type}-blue-500`)) return '#3b82f6';
+    if (classes.includes(`${type}-indigo-600`)) return '#4f46e5';
+    if (classes.includes(`${type}-purple-600`)) return '#9333ea';
+    if (classes.includes(`${type}-red-500`)) return '#ef4444';
+    if (classes.includes(`${type}-amber-500`)) return '#f59e0b';
+    
+    return '';
+  };
+
+  const updateDynamicColor = (type: 'bg' | 'text' | 'border', hexOrUtil: string) => {
+    if (!selectedElement) return;
+    let currentClasses = selectedElement.classes.split(' ').filter(c => c.trim().length > 0);
+    
+    // Clear out standard patterns for background, text, or border classes
+    const pfxs = [`${type}-`, `hover:${type}-`, `focus:${type}-`];
+    currentClasses = currentClasses.filter(c => !pfxs.some(p => c.startsWith(p)));
+    
+    if (hexOrUtil) {
+      if (hexOrUtil.startsWith('#') || hexOrUtil.startsWith('rgb') || hexOrUtil.startsWith('hsl')) {
+        currentClasses.push(`${type}-[${hexOrUtil}]`);
+      } else {
+        currentClasses.push(`${type}-${hexOrUtil}`);
+      }
+    }
+    
+    handleUpdateClasses(currentClasses.join(' '));
   };
 
   const applyStyleClass = (categoryPrefixes: string[], activeClass: string) => {
@@ -436,9 +502,13 @@ const App: React.FC = () => {
       }
 
       setView(AppView.PREVIEW);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      alert("Failed to generate UI.");
+      if (error?.isApiKeyRestricted || error?.message?.includes('API_KEY_RESTRICTED') || error?.message?.includes('API key')) {
+        setApiKeyErrorDetails(error.message || 'Restricted Key Error');
+      } else {
+        alert("Failed to generate UI: " + (error?.message || "Unknown error"));
+      }
       setView(AppView.LANDING);
     } finally {
       setIsGeneratingUI(false);
@@ -725,6 +795,8 @@ const App: React.FC = () => {
             <div className="flex items-center gap-2 shrink-0">
               <button 
                 onClick={() => {
+                  setPages([{ name: 'Home', html: currentVariant.html }]);
+                  setActivePageIndex(0);
                   setBuilderHtml(currentVariant.html);
                   setView(AppView.BUILDER);
                 }} 
@@ -749,12 +821,29 @@ const App: React.FC = () => {
     setIsChatGenerating(true);
     
     try {
-      const updatedHtml = await modifyUI(builderHtml, userMsg);
-      setBuilderHtml(updatedHtml);
-      setChatMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: 'I have updated the design based on your request.' }]);
-    } catch (error) {
+      const result = await modifyUI(builderHtml, userMsg);
+      // Update HTML content
+      setBuilderHtml(result.html);
+      
+      // Update the active page's html in our page system!
+      setPages(prev => prev.map((p, idx) => 
+        idx === activePageIndex ? { ...p, html: result.html } : p
+      ));
+
+      // Append AI Reasoning to chat interaction log
+      setChatMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: result.reasoning }]);
+    } catch (error: any) {
       console.error(error);
-      setChatMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: 'Sorry, I encountered an error while updating the design.' }]);
+      if (error?.isApiKeyRestricted || error?.message?.includes('API_KEY_RESTRICTED') || error?.message?.includes('API key')) {
+        setApiKeyErrorDetails(error.message || 'Restricted Key Error');
+        setChatMessages(prev => [...prev, { 
+          id: Date.now().toString(), 
+          role: 'ai', 
+          content: `⚠️ **API Key Restriction Detected**\n\nYour Gemini API Key is restricted to "Agent Platform (Vertex) API" only in the Google Cloud Console. Standard Gemini operations require the "Generative Language API" to be enabled.\n\n*Click the popping credentials instructions modal or troubleshoot using the button to solve this issue.*` 
+        }]);
+      } else {
+        setChatMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: `Sorry, I encountered an error while updating the design: ${error?.message || "Unknown error"}` }]);
+      }
     } finally {
       setIsChatGenerating(false);
     }
@@ -1031,31 +1120,154 @@ const App: React.FC = () => {
                       })}
                     </div>
                   </div>
+                  
+                  {/* Category: Dynamic Color Palette & Color Wheel */}
+                  <div className="space-y-4 border-t border-white/5 pt-4">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 block">Dynamic Element Palette</span>
+                    
+                    <div className="grid grid-cols-1 gap-4 bg-white/[0.02] border border-white/5 p-4 rounded-xl">
+                      {/* Sub-item: Background Color */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div 
+                            className="w-5 h-5 rounded-full border border-white/10 shadow-sm transition-transform hover:scale-110 cursor-pointer"
+                            style={{ backgroundColor: parseHexColor(selectedElement.classes, 'bg') || 'transparent' }}
+                            title="Current Background"
+                          />
+                          <div className="flex flex-col">
+                            <span className="text-[11px] font-bold text-zinc-300">Background</span>
+                            <span className="text-[9px] font-mono text-zinc-500 uppercase">
+                              {parseHexColor(selectedElement.classes, 'bg') || 'Not Set'}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center gap-1.5 justify-end">
+                          {/* Color Wheel Selector */}
+                          <div className="relative w-7 h-7 rounded-lg overflow-hidden border border-white/10 hover:border-emerald-500/50 transition-colors bg-white/5 flex items-center justify-center cursor-pointer">
+                            <input 
+                              type="color" 
+                              value={parseHexColor(selectedElement.classes, 'bg').startsWith('#') ? parseHexColor(selectedElement.classes, 'bg') : '#000000'}
+                              onChange={(e) => updateDynamicColor('bg', e.target.value)}
+                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full scale-150"
+                            />
+                            <Palette className="w-3.5 h-3.5 text-zinc-400 pointer-events-none" />
+                          </div>
+                          {/* Hex text input */}
+                          <input 
+                            type="text"
+                            placeholder="#000000"
+                            value={parseHexColor(selectedElement.classes, 'bg')}
+                            onChange={(e) => updateDynamicColor('bg', e.target.value)}
+                            className="w-20 bg-black/60 border border-white/10 rounded px-2 py-1 text-[11px] font-mono text-center text-emerald-400 focus:outline-none focus:border-emerald-500/40"
+                          />
+                        </div>
+                      </div>
 
-                  {/* Category: Background Color */}
-                  <div className="space-y-1.5">
-                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Background Theme</span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {[
-                        { label: 'Transparent', val: 'bg-transparent' },
-                        { label: 'Dark Slate', val: 'bg-zinc-900 border border-white/5' },
-                        { label: 'Medium Steel', val: 'bg-zinc-800' },
-                        { label: 'Emerald Glow', val: 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/20' },
-                        { label: 'Solid Emerald', val: 'bg-emerald-500 text-black font-bold' },
-                        { label: 'Indigo Accent', val: 'bg-indigo-600' }
-                      ].map(item => {
-                        const isCurrent = selectedElement.classes.includes(item.val.split(' ')[0]);
-                        return (
-                          <button
-                            key={item.label}
-                            type="button"
-                            onClick={() => applyStyleClass(['bg-'], item.val)}
-                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all cursor-pointer border ${isCurrent ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-white/5 border-white/5 text-zinc-450 hover:bg-white/10 hover:text-white'}`}
-                          >
-                            {item.label}
-                          </button>
-                        );
-                      })}
+                      {/* Sub-item: Text Color */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div 
+                            className="w-5 h-5 rounded-full border border-white/10 shadow-sm transition-transform hover:scale-110 cursor-pointer"
+                            style={{ backgroundColor: parseHexColor(selectedElement.classes, 'text') || 'transparent' }}
+                            title="Current Text"
+                          />
+                          <div className="flex flex-col">
+                            <span className="text-[11px] font-bold text-zinc-300 font-sans">Text Color</span>
+                            <span className="text-[9px] font-mono text-zinc-500 uppercase">
+                              {parseHexColor(selectedElement.classes, 'text') || 'Not Set'}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center gap-1.5 justify-end">
+                          {/* Color Wheel Selector */}
+                          <div className="relative w-7 h-7 rounded-lg overflow-hidden border border-white/10 hover:border-emerald-500/50 transition-colors bg-white/5 flex items-center justify-center cursor-pointer">
+                            <input 
+                              type="color" 
+                              value={parseHexColor(selectedElement.classes, 'text').startsWith('#') ? parseHexColor(selectedElement.classes, 'text') : '#ffffff'}
+                              onChange={(e) => updateDynamicColor('text', e.target.value)}
+                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full scale-150"
+                            />
+                            <Palette className="w-3.5 h-3.5 text-zinc-400 pointer-events-none" />
+                          </div>
+                          {/* Hex text input */}
+                          <input 
+                            type="text"
+                            placeholder="#ffffff"
+                            value={parseHexColor(selectedElement.classes, 'text')}
+                            onChange={(e) => updateDynamicColor('text', e.target.value)}
+                            className="w-20 bg-black/60 border border-white/10 rounded px-2 py-1 text-[11px] font-mono text-center text-emerald-400 focus:outline-none focus:border-emerald-500/40"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Sub-item: Border Color */}
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div 
+                            className="w-5 h-5 rounded-full border border-white/10 shadow-sm transition-transform hover:scale-110 cursor-pointer"
+                            style={{ backgroundColor: parseHexColor(selectedElement.classes, 'border') || 'transparent' }}
+                            title="Current Border"
+                          />
+                          <div className="flex flex-col">
+                            <span className="text-[11px] font-bold text-zinc-300">Border Color</span>
+                            <span className="text-[9px] font-mono text-zinc-500 uppercase">
+                              {parseHexColor(selectedElement.classes, 'border') || 'Not Set'}
+                            </span>
+                          </div>
+                        </div>
+                        
+                        <div className="flex items-center gap-1.5 justify-end">
+                          {/* Color Wheel Selector */}
+                          <div className="relative w-7 h-7 rounded-lg overflow-hidden border border-white/10 hover:border-emerald-500/50 transition-colors bg-white/5 flex items-center justify-center cursor-pointer">
+                            <input 
+                              type="color" 
+                              value={parseHexColor(selectedElement.classes, 'border').startsWith('#') ? parseHexColor(selectedElement.classes, 'border') : '#ffffff'}
+                              onChange={(e) => updateDynamicColor('border', e.target.value)}
+                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full scale-150"
+                            />
+                            <Palette className="w-3.5 h-3.5 text-zinc-400 pointer-events-none" />
+                          </div>
+                          {/* Hex text input */}
+                          <input 
+                            type="text"
+                            placeholder="#ffffff"
+                            value={parseHexColor(selectedElement.classes, 'border')}
+                            onChange={(e) => updateDynamicColor('border', e.target.value)}
+                            className="w-20 bg-black/60 border border-white/10 rounded px-2 py-1 text-[11px] font-mono text-center text-emerald-400 focus:outline-none focus:border-emerald-500/40"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Brand Quick Palettes presets list */}
+                      <div className="border-t border-white/5 pt-3 mt-1 space-y-2">
+                        <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest block">Palette Presets (Branding)</span>
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          {[
+                            { name: 'Pure Dark', bg: '#09090b', text: '#ffffff', bdr: '#27272a' },
+                            { name: 'Cyber Neon', bg: '#030712', text: '#34d399', bdr: '#059669' },
+                            { name: 'Warm Amber', bg: '#1c1917', text: '#fcd34d', bdr: '#d97706' },
+                            { name: 'Clean Light', bg: '#ffffff', text: '#09090b', bdr: '#cbd5e1' },
+                            { name: 'Nordic Snow', bg: '#f8fafc', text: '#0f172a', bdr: '#cbd5e1' },
+                            { name: 'Indigo Core', bg: '#eff6ff', text: '#2563eb', bdr: '#3b82f6' }
+                          ].map(preset => (
+                            <button
+                              key={preset.name}
+                              type="button"
+                              onClick={() => {
+                                updateDynamicColor('bg', preset.bg);
+                                updateDynamicColor('text', preset.text);
+                                updateDynamicColor('border', preset.bdr);
+                              }}
+                              className="px-2 py-1 rounded bg-white/5 border border-white/5 hover:bg-white/10 hover:border-white/10 transition-all text-[9px] font-mono text-zinc-400 cursor-pointer hover:text-white flex items-center gap-1"
+                            >
+                              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: preset.bg }} />
+                              <span>{preset.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                     </div>
                   </div>
 
@@ -1076,7 +1288,7 @@ const App: React.FC = () => {
                             key={item.label}
                             type="button"
                             onClick={() => applyStyleClass(['rounded-'], item.val)}
-                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all cursor-pointer border ${isCurrent ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-white/5 border-white/5 text-zinc-450 hover:bg-white/10 hover:text-white'}`}
+                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all cursor-pointer border ${isCurrent ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-white/5 border-white/5 text-zinc-455 hover:bg-white/10 hover:text-white'}`}
                           >
                             {item.label}
                           </button>
@@ -1101,31 +1313,6 @@ const App: React.FC = () => {
                             type="button"
                             onClick={() => applyStyleClass(['text-left', 'text-center', 'text-right'], item.val)}
                             className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all cursor-pointer border ${isCurrent ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-white/5 border-white/5 text-zinc-455 hover:bg-white/10 hover:text-white'}`}
-                          >
-                            {item.label}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-
-                  {/* Category: Borders */}
-                  <div className="space-y-1.5">
-                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Border Outline</span>
-                    <div className="flex flex-wrap gap-1.5">
-                      {[
-                        { label: 'None', val: 'border-none' },
-                        { label: 'Subtle Glassy', val: 'border border-white/10' },
-                        { label: 'Emerald Tint', val: 'border border-emerald-500/30' },
-                        { label: 'Solid Border', val: 'border-2 border-zinc-700' }
-                      ].map(item => {
-                        const isCurrent = selectedElement.classes.includes(item.val.split(' ')[0]) && item.val !== 'border-none';
-                        return (
-                          <button
-                            key={item.label}
-                            type="button"
-                            onClick={() => applyStyleClass(['border', 'border-'], item.val === 'border-none' ? '' : item.val)}
-                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all cursor-pointer border ${isCurrent || (item.val === 'border-none' && !selectedElement.classes.includes('border')) ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-white/5 border-white/5 text-zinc-455 hover:bg-white/10 hover:text-white'}`}
                           >
                             {item.label}
                           </button>
@@ -1687,6 +1874,13 @@ const App: React.FC = () => {
                 });
               }
             }}
+          />
+        ) : null}
+
+        {apiKeyErrorDetails ? (
+          <ApiKeyErrorModal 
+            details={apiKeyErrorDetails}
+            onClose={() => setApiKeyErrorDetails(null)}
           />
         ) : null}
       </AnimatePresence>
