@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { X, Sparkles, CreditCard, CheckCircle, Loader2, Shield, Lock, Landmark, User, Calendar, Key, AlertCircle } from 'lucide-react';
-import { db, doc, setDoc, handleFirestoreError, OperationType } from '../firebase.ts';
+import { X, Sparkles, CreditCard, CheckCircle, Loader2, Shield, Lock, AlertCircle } from 'lucide-react';
 import { UserProfile } from '../types.ts';
 
 interface UpgradeModalProps {
@@ -10,16 +9,9 @@ interface UpgradeModalProps {
   onSuccess: (newSubscription: any) => void;
 }
 
-export const UpgradeModal: React.FC<UpgradeModalProps> = ({ user, onClose, onSuccess }) => {
-  const [cardNumber, setCardNumber] = useState('');
-  const [cardName, setCardName] = useState('');
-  const [expiry, setExpiry] = useState('');
-  const [cvc, setCvc] = useState('');
-  const [isProcessing, setIsProcessing] = useState(false);
+export const UpgradeModal: React.FC<UpgradeModalProps> = ({ user, onClose }) => {
   const [error, setError] = useState('');
   const [step, setStep] = useState<'details' | 'success'>('details');
-
-  const stripeKey = process.env.VITE_STRIPE_PUBLISHABLE_KEY;
   const [isStripeRedirecting, setIsStripeRedirecting] = useState(false);
 
   React.useEffect(() => {
@@ -38,6 +30,9 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ user, onClose, onSuc
     setIsStripeRedirecting(true);
 
     try {
+      // Access the optional payment link from client settings
+      const configuredPaymentLink = (import.meta as any).env?.VITE_STRIPE_PAYMENT_LINK;
+      
       const response = await fetch('/api/stripe/create-checkout-session', {
         method: 'POST',
         headers: {
@@ -50,99 +45,43 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ user, onClose, onSuc
         }),
       });
 
+      if (response.status === 404) {
+        if (configuredPaymentLink) {
+          // Fallback seamlessly to Stripe Payment Link if defined (perfect for static SPA deployments!)
+          const checkoutUrl = `${configuredPaymentLink}?prefilled_email=${encodeURIComponent(user.email || '')}&client_reference_id=${user.uid}`;
+          window.location.href = checkoutUrl;
+          return;
+        }
+        throw new Error(
+          'Stripe checkout session API is offline or not configured on this custom domain. If you are hosting a static front-end page, you can easily activate your account subscription from the Admin tab inside this workspace, or specify a custom Stripe Payment Link (using VITE_STRIPE_PAYMENT_LINK in .env).'
+        );
+      }
+
       if (!response.ok) {
-        const errJson = await response.json();
-        throw new Error(errJson.error || 'Server error creating checkout session.');
+        let errMessage = 'Server error creating checkout session.';
+        // Prevent JSON parsing crashes if the response is standard HTML error pages
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          const errJson = await response.json();
+          errMessage = errJson.error || errMessage;
+        } else {
+          errMessage = `HTTP Error ${response.status}: Failed to reach checkout.`;
+        }
+        throw new Error(errMessage);
       }
 
       const session = await response.json();
       if (!session.url) {
-        throw new Error('No checkout session URL returned from backend.');
+        throw new Error('No checkout session URL returned from the payment network.');
       }
 
-      // Safe, compliant redirect to checkout
+      // Safe, compliant redirect to Stripe hosted checkout screen
       window.location.href = session.url;
     } catch (err: any) {
       console.error('Stripe Checkout Error:', err);
       setError(err.message || 'Failed to initialize secure checkout session with Stripe.');
     } finally {
       setIsStripeRedirecting(false);
-    }
-  };
-
-  const handleCardNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let value = e.target.value.replace(/\D/g, '');
-    if (value.length > 16) value = value.slice(0, 16);
-    const formatted = value.match(/.{1,4}/g)?.join(' ') || value;
-    setCardNumber(formatted);
-  };
-
-  const handleExpiryChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let value = e.target.value.replace(/\D/g, '');
-    if (value.length > 4) value = value.slice(0, 4);
-    if (value.length > 2) {
-      value = `${value.slice(0, 2)}/${value.slice(2)}`;
-    }
-    setExpiry(value);
-  };
-
-  const handleCvcChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const value = e.target.value.replace(/\D/g, '').slice(0, 3);
-    setCvc(value);
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user) {
-      setError('Please sign in to proceed.');
-      return;
-    }
-
-    if (cardNumber.replace(/\s/g, '').length < 16) {
-      setError('Please enter a valid 16-digit card number.');
-      return;
-    }
-    if (!cardName.trim()) {
-      setError('Please enter the cardholder Name.');
-      return;
-    }
-    if (expiry.length < 5) {
-      setError('Please enter a valid expiry date (MM/YY).');
-      return;
-    }
-    if (cvc.length < 3) {
-      setError('Please enter a valid 3-digit CVC.');
-      return;
-    }
-
-    setError('');
-    setIsProcessing(true);
-
-    try {
-      // Simulate real Stripe payment network delay (1.8s)
-      await new Promise((resolve) => setTimeout(resolve, 1800));
-
-      const mockSub = {
-        status: 'active',
-        plan: 'Pro',
-        billingCycle: 'monthly',
-        createdAt: new Date().toISOString()
-      };
-
-      const userRef = doc(db, 'users', user.uid);
-      try {
-        await setDoc(userRef, { subscription: mockSub }, { merge: true });
-      } catch (dbErr) {
-        handleFirestoreError(dbErr, OperationType.UPDATE, `users/${user.uid}`);
-      }
-
-      setStep('success');
-      onSuccess(mockSub);
-    } catch (err) {
-      console.error(err);
-      setError('Transaction was refused by Stripe payment network.');
-    } finally {
-      setIsProcessing(false);
     }
   };
 
@@ -153,12 +92,12 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ user, onClose, onSuc
         animate={{ opacity: 1, scale: 1, y: 0 }}
         exit={{ opacity: 0, scale: 0.95, y: 15 }}
         transition={{ duration: 0.3, ease: [0.16, 1, 0.3, 1] }}
-        className="relative w-full max-w-4xl bg-zinc-950/75 border border-white/10 rounded-[32px] shadow-2xl overflow-hidden grid grid-cols-1 md:grid-cols-12 min-h-[550px]"
+        className="relative w-full max-w-4xl bg-zinc-950/75 border border-white/10 rounded-[32px] shadow-2xl overflow-hidden grid grid-cols-1 md:grid-cols-12 min-h-[500px]"
       >
         {/* Close Button */}
         <button
           onClick={onClose}
-          className="absolute top-6 right-6 p-2 rounded-full bg-white/5 border border-white/10 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors z-50"
+          className="absolute top-6 right-6 p-2 rounded-full bg-white/5 border border-white/10 text-zinc-400 hover:text-white hover:bg-white/10 transition-colors z-50 cursor-pointer"
         >
           <X className="w-5 h-5" />
         </button>
@@ -183,16 +122,16 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ user, onClose, onSuc
                 <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
                 <div>
                   <h4 className="text-sm font-semibold text-white">Unlimited Generations</h4>
-                  <p className="text-xs text-zinc-400">Standard users are limited to 3 generations per day.</p>
+                  <p className="text-xs text-zinc-400">Never hit limit ceilings or daily generation blockages again.</p>
                 </div>
               </div>
 
               <div className="flex items-start gap-3">
                 <CheckCircle className="w-5 h-5 text-emerald-400 shrink-0 mt-0.5" />
                 <div>
-                  <h4 className="text-sm font-semibold text-white">Manual Tailwind Editing</h4>
+                  <h4 className="text-sm font-semibold text-white">Interactive Styling Panel</h4>
                   <p className="text-xs text-zinc-400 flex items-center gap-1.5 flex-wrap">
-                    Unlock interactive class additions <span className="text-[10px] bg-emerald-500/10 text-emerald-300 px-1.5 py-0.5 rounded border border-emerald-500/20 font-bold uppercase tracking-wider">Unlimited</span>
+                    Unlock full point-and-click stylesheet tools to modify any element on the preview canvas instantly.
                   </p>
                 </div>
               </div>
@@ -244,169 +183,60 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ user, onClose, onSuc
                   </div>
                   <div>
                     <h3 className="text-lg font-bold">Stripe SECURE CHECKOUT</h3>
-                    <div className="flex flex-col gap-0.5">
-                      <p className="text-zinc-500 text-xs">SSL Encrypted 128-bit Payment Channel</p>
-                      {stripeKey ? (
-                        <div className="text-[10px] text-emerald-400 font-mono mt-0.5 flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                          <span>Connected to custom key: {stripeKey.length > 15 ? `${stripeKey.substring(0, 15)}...` : stripeKey}</span>
-                        </div>
-                      ) : (
-                        <div className="text-[10px] text-amber-500 font-mono mt-0.5 flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
-                          <span>Sandbox Simulation Mode (No custom Stripe key in .env)</span>
-                        </div>
-                      )}
-                    </div>
+                    <p className="text-zinc-500 text-xs mt-0.5">SSL Encrypted 256-bit Payment Channel</p>
                   </div>
                 </div>
 
-                {/* Stripe Hosted Checkout Premium integration */}
-                <div className="bg-gradient-to-br from-indigo-500/10 via-purple-500/5 to-emerald-500/10 border border-white/5 rounded-2xl p-5 space-y-3.5 shadow-inner">
+                {error && (
+                  <div className="flex items-start gap-3 p-4 rounded-2xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs leading-relaxed">
+                    <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                {/* Secure Gateway Presentation and Redirect Action */}
+                <div className="bg-gradient-to-br from-indigo-500/10 via-purple-500/5 to-emerald-500/10 border border-white/5 rounded-2xl p-6 space-y-4 shadow-inner">
                   <div className="flex items-start gap-3">
                     <Sparkles className="w-5 h-5 text-emerald-400 rotate-12 shrink-0 mt-0.5" />
                     <div>
-                      <h4 className="text-xs font-black text-white tracking-tight uppercase">Stripe Subscription (Real Checkout)</h4>
+                      <h4 className="text-xs font-black text-white tracking-tight uppercase">Stripe Subscription Integration</h4>
                       <p className="text-zinc-400 text-[11px] leading-relaxed mt-0.5">
-                        Redirect securely to our Stripe subscription gateway to complete your payment with full card processing, Google Pay, or Apple Pay.
+                        Redirect securely to Stripe's hosted subscription gateway to complete your premium upgrade safely. Your payments and cards are guarded by industry standard security frameworks.
                       </p>
                     </div>
                   </div>
 
                   <button
                     type="button"
-                    disabled={isStripeRedirecting || isProcessing}
+                    disabled={isStripeRedirecting}
                     onClick={handleStripeCheckoutRedirect}
-                    className="w-full bg-gradient-to-r from-purple-500 via-blue-500 to-emerald-500 hover:opacity-90 active:scale-[0.99] text-white py-3.5 px-4 rounded-xl text-xs font-extrabold tracking-wide uppercase transition-all shadow-lg flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                    className="w-full bg-gradient-to-r from-purple-500 via-blue-500 to-emerald-500 hover:opacity-95 active:scale-[0.99] text-white py-4 px-5 rounded-xl text-xs font-black tracking-wide uppercase transition-all shadow-lg flex items-center justify-center gap-2 cursor-pointer disabled:opacity-50"
                   >
                     {isStripeRedirecting ? (
                       <>
                         <Loader2 className="w-4 h-4 animate-spin text-white" />
-                        <span>Initializing Checkout Session...</span>
+                        <span>Initializing Secure Session...</span>
                       </>
                     ) : (
                       <>
-                        <Sparkles className="w-3.5 h-3.5 text-yellow-300 fill-yellow-300/20" />
-                        <span>Pay 14.00 USD with Stripe</span>
+                        <Sparkles className="w-3.5 h-3.5 text-yellow-300" />
+                        <span>Upgrade with Stripe - $14.00</span>
                       </>
                     )}
                   </button>
                 </div>
 
-                <div className="relative flex items-center justify-center py-1">
-                  <div className="absolute inset-x-0 h-px bg-white/5" />
-                  <span className="relative px-3 bg-[#0a0a0a] text-zinc-500 font-mono text-[9px] uppercase tracking-widest leading-none">OR Developer Simulator Option</span>
+                {/* Secure Badge Indicators */}
+                <div className="pt-4 border-t border-white/5 flex items-center justify-between text-[11px] text-zinc-500">
+                  <div className="flex items-center gap-1.5">
+                    <Shield className="w-3.5 h-3.5 text-emerald-500" />
+                    <span>PCI-DSS SSL Merchant Certified</span>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <Lock className="w-3.5 h-3.5 text-zinc-400" />
+                    <span>Secure Gateway connection</span>
+                  </div>
                 </div>
-
-                <form onSubmit={handleSubmit} className="space-y-4">
-                  {error && (
-                    <div className="flex items-center gap-2 p-3.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 text-xs font-semibold">
-                      <AlertCircle className="w-4 h-4 shrink-0" />
-                      <span>{error}</span>
-                    </div>
-                  )}
-
-                  {/* Card Number */}
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider flex items-center gap-1">
-                      <CreditCard className="w-3 h-3 text-zinc-500" /> Card Number
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="text"
-                        value={cardNumber}
-                        onChange={handleCardNumberChange}
-                        placeholder="4242 4242 4242 4242"
-                        className="w-full bg-white/5 border border-white/10 hover:border-white/20 focus:border-purple-500/50 rounded-xl px-4 py-3 text-white text-sm font-mono placeholder:text-zinc-600 focus:outline-none transition-colors"
-                        required
-                        disabled={isProcessing}
-                      />
-                      <div className="absolute right-4 top-1/2 -translate-y-1/2 flex items-center gap-1.5 pointer-events-none">
-                        <span className="text-[9px] uppercase font-bold text-zinc-500 bg-white/5 border border-white/10 px-1 py-0.5 rounded leading-none">Stripe</span>
-                      </div>
-                    </div>
-                  </div>
-
-                  {/* Cardholder Name */}
-                  <div className="space-y-1.5">
-                    <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider flex items-center gap-1">
-                      <User className="w-3 h-3 text-zinc-500" /> Cardholder Name
-                    </label>
-                    <input
-                      type="text"
-                      value={cardName}
-                      onChange={(e) => setCardName(e.target.value)}
-                      placeholder="Jane Doe"
-                      className="w-full bg-white/5 border border-white/10 hover:border-white/20 focus:border-purple-500/50 rounded-xl px-4 py-3 text-white text-sm placeholder:text-zinc-600 focus:outline-none transition-colors"
-                      required
-                      disabled={isProcessing}
-                    />
-                  </div>
-
-                  {/* Expiry & CVC Grid */}
-                  <div className="grid grid-cols-2 gap-4">
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider flex items-center gap-1">
-                        <Calendar className="w-3 h-3 text-zinc-500" /> Expiry Date
-                      </label>
-                      <input
-                        type="text"
-                        value={expiry}
-                        onChange={handleExpiryChange}
-                        placeholder="MM/YY"
-                        className="w-full bg-white/5 border border-white/10 hover:border-white/20 focus:border-purple-500/50 rounded-xl px-4 py-3 text-white text-sm text-center font-mono placeholder:text-zinc-600 focus:outline-none transition-colors"
-                        required
-                        disabled={isProcessing}
-                      />
-                    </div>
-
-                    <div className="space-y-1.5">
-                      <label className="text-[10px] uppercase font-bold text-zinc-500 tracking-wider flex items-center gap-1">
-                        <Key className="w-3 h-3 text-zinc-500" /> security code (cvc)
-                      </label>
-                      <input
-                        type="password"
-                        value={cvc}
-                        onChange={handleCvcChange}
-                        placeholder="123"
-                        className="w-full bg-white/5 border border-white/10 hover:border-white/20 focus:border-purple-500/50 rounded-xl px-4 py-3 text-white text-sm text-center font-mono placeholder:text-zinc-600 focus:outline-none transition-colors"
-                        required
-                        disabled={isProcessing}
-                      />
-                    </div>
-                  </div>
-
-                  {/* SSL Indicator */}
-                  <div className="pt-2 flex items-center justify-between text-[11px] text-zinc-500">
-                    <div className="flex items-center gap-1.5">
-                      <Shield className="w-3.5 h-3.5 text-emerald-500" />
-                      <span>Stripe Certified PCI-DSS Compliant</span>
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Lock className="w-3 h-3" />
-                      <span>Secure 256-bit Connection</span>
-                    </div>
-                  </div>
-
-                  {/* Submit Checkout Button */}
-                  <button
-                    type="submit"
-                    disabled={isProcessing}
-                    className="w-full mt-4 bg-white hover:bg-zinc-200 text-black py-4 rounded-xl font-bold text-sm tracking-wide transition-all shadow-xl hover:scale-[1.01] active:scale-[0.99] disabled:opacity-50 flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    {isProcessing ? (
-                      <>
-                        <Loader2 className="w-4 h-4 animate-spin" />
-                        <span>Processing with Stripe...</span>
-                      </>
-                    ) : (
-                      <>
-                        <Lock className="w-4 h-4" />
-                        <span>Authorize and Pay $14.00</span>
-                      </>
-                    )}
-                  </button>
-                </form>
               </motion.div>
             ) : (
               <motion.div
@@ -428,8 +258,8 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ user, onClose, onSuc
 
                 <div className="w-full max-w-sm bg-zinc-950/60 border border-white/5 rounded-2xl p-5 mt-8 space-y-3 font-mono text-xs text-left">
                   <div className="flex justify-between border-b border-white/5 pb-2">
-                    <span className="text-zinc-500">Transaction ID</span>
-                    <span className="text-zinc-350">ch_3N1f92LK03rWp2as88</span>
+                    <span className="text-zinc-500">Transaction Status</span>
+                    <span className="text-emerald-400 font-bold">SUCCESS</span>
                   </div>
                   <div className="flex justify-between border-b border-white/5 pb-2">
                     <span className="text-zinc-500">Receipt Email</span>
