@@ -20,6 +20,55 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ user, onClose, onSuc
   const [step, setStep] = useState<'details' | 'success'>('details');
 
   const stripeKey = process.env.VITE_STRIPE_PUBLISHABLE_KEY;
+  const [isStripeRedirecting, setIsStripeRedirecting] = useState(false);
+
+  React.useEffect(() => {
+    if (user?.subscription?.status === 'active') {
+      setStep('success');
+    }
+  }, [user?.subscription?.status]);
+
+  const handleStripeCheckoutRedirect = async () => {
+    if (!user) {
+      setError('Please sign in to proceed.');
+      return;
+    }
+
+    setError('');
+    setIsStripeRedirecting(true);
+
+    try {
+      const response = await fetch('/api/stripe/create-checkout-session', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: user.uid,
+          userEmail: user.email,
+          appUrl: window.location.origin,
+        }),
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json();
+        throw new Error(errJson.error || 'Server error creating checkout session.');
+      }
+
+      const session = await response.json();
+      if (!session.url) {
+        throw new Error('No checkout session URL returned from backend.');
+      }
+
+      // Safe, compliant redirect to checkout
+      window.location.href = session.url;
+    } catch (err: any) {
+      console.error('Stripe Checkout Error:', err);
+      setError(err.message || 'Failed to initialize secure checkout session with Stripe.');
+    } finally {
+      setIsStripeRedirecting(false);
+    }
+  };
 
   const handleCardNumberChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let value = e.target.value.replace(/\D/g, '');
@@ -210,6 +259,43 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ user, onClose, onSuc
                       )}
                     </div>
                   </div>
+                </div>
+
+                {/* Stripe Hosted Checkout Premium integration */}
+                <div className="bg-gradient-to-br from-indigo-500/10 via-purple-500/5 to-emerald-500/10 border border-white/5 rounded-2xl p-5 space-y-3.5 shadow-inner">
+                  <div className="flex items-start gap-3">
+                    <Sparkles className="w-5 h-5 text-emerald-400 rotate-12 shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="text-xs font-black text-white tracking-tight uppercase">Stripe Subscription (Real Checkout)</h4>
+                      <p className="text-zinc-400 text-[11px] leading-relaxed mt-0.5">
+                        Redirect securely to our Stripe subscription gateway to complete your payment with full card processing, Google Pay, or Apple Pay.
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    disabled={isStripeRedirecting || isProcessing}
+                    onClick={handleStripeCheckoutRedirect}
+                    className="w-full bg-gradient-to-r from-purple-500 via-blue-500 to-emerald-500 hover:opacity-90 active:scale-[0.99] text-white py-3.5 px-4 rounded-xl text-xs font-extrabold tracking-wide uppercase transition-all shadow-lg flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                  >
+                    {isStripeRedirecting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-white" />
+                        <span>Initializing Checkout Session...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-3.5 h-3.5 text-yellow-300 fill-yellow-300/20" />
+                        <span>Pay 14.00 USD with Stripe</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div className="relative flex items-center justify-center py-1">
+                  <div className="absolute inset-x-0 h-px bg-white/5" />
+                  <span className="relative px-3 bg-[#0a0a0a] text-zinc-500 font-mono text-[9px] uppercase tracking-widest leading-none">OR Developer Simulator Option</span>
                 </div>
 
                 <form onSubmit={handleSubmit} className="space-y-4">

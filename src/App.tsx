@@ -135,6 +135,56 @@ const App: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
+  // Parse returning query params on successful Stripe transaction redirects
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('checkout_success') === 'true') {
+      setShowUpgradeModal(true);
+      // Clean query parameters from URL for pristine state without full reload
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, newUrl);
+    } else if (params.get('checkout_cancelled') === 'true') {
+      const newUrl = window.location.pathname;
+      window.history.replaceState({}, document.title, newUrl);
+    }
+  }, []);
+
+  // Sync fresh subscription state from Firestore on successful checkout redirects
+  useEffect(() => {
+    if (user && isAuthReady) {
+      const checkParams = new URL(window.location.href);
+      // If we are showing upgrade modal or just returned from successful checkouts
+      if (showUpgradeModal) {
+        const syncSub = async () => {
+          for (let attempt = 1; attempt <= 4; attempt++) {
+            try {
+              const userRef = doc(db, 'users', user.uid);
+              const userSnap = await getDoc(userRef);
+              if (userSnap.exists()) {
+                const data = userSnap.data();
+                if (data?.subscription?.status === 'active') {
+                  setUser({
+                    ...user,
+                    subscription: data.subscription
+                  });
+                  refreshLimits({
+                    ...user,
+                    subscription: data.subscription
+                  });
+                  break;
+                }
+              }
+            } catch (err) {
+              console.error("Failed to sync sub on return", err);
+            }
+            await new Promise((resolve) => setTimeout(resolve, 1500));
+          }
+        };
+        syncSub();
+      }
+    }
+  }, [user?.uid, isAuthReady, showUpgradeModal]);
+
   const handleSignIn = async () => {
     try {
       await signInWithPopup(auth, googleProvider);
