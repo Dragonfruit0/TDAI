@@ -122,6 +122,25 @@ service cloud.firestore {
              (!('cost' in data) || (data.cost is number));
     }
 
+    function isValidSavedDesign(data) {
+       return hasOnlyAllowedFields(['userId', 'name', 'html', 'parentPrompt', 'createdAt']) &&
+              data.userId is string && data.userId.size() > 0 && data.userId.size() < 128 &&
+              data.name is string && data.name.size() > 0 && data.name.size() < 500 &&
+              data.html is string && data.html.size() > 0 && data.html.size() < 100000 &&
+              data.parentPrompt is string && data.parentPrompt.size() > 0 && data.parentPrompt.size() < 5000 &&
+              data.createdAt is string && isValidDateString(data.createdAt);
+    }
+
+    function isValidChatbotUsage(data) {
+       return hasOnlyAllowedFields(['userId', 'userEmail', 'prompt', 'usage', 'cost', 'createdAt']) &&
+              data.userId is string && data.userId.size() > 0 && data.userId.size() < 128 &&
+              data.userEmail is string && isValidEmail(data.userEmail) && data.userEmail.size() < 256 &&
+              data.prompt is string && data.prompt.size() > 0 && data.prompt.size() < 5000 &&
+              data.usage is map && data.usage.keys().hasAll(['promptTokenCount', 'candidatesTokenCount', 'totalTokenCount']) &&
+              data.cost is number &&
+              data.createdAt is string && isValidDateString(data.createdAt);
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
@@ -148,6 +167,25 @@ service cloud.firestore {
                        request.resource.data.userId == request.auth.uid;
       allow update: if isAdmin();
       allow delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+    }
+
+    match /saved_designs/{savedDesignId} {
+      allow read: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+      allow create: if isAuthenticated() && 
+                       hasRequiredFields(['userId', 'name', 'html', 'parentPrompt', 'createdAt']) &&
+                       isValidSavedDesign(request.resource.data) &&
+                       request.resource.data.userId == request.auth.uid;
+      allow update: if isAdmin();
+      allow delete: if isAdmin() || (isAuthenticated() && resource.data.userId == request.auth.uid);
+    }
+
+    match /chatbot_usage/{usageId} {
+      allow read: if isAdmin();
+      allow create: if isAuthenticated() && 
+                       hasRequiredFields(['userId', 'userEmail', 'prompt', 'usage', 'cost', 'createdAt']) &&
+                       isValidChatbotUsage(request.resource.data) &&
+                       request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
     }
   }
 }

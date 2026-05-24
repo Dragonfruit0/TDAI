@@ -196,13 +196,27 @@ export const UIPreview: React.FC<UIPreviewProps> = ({ html, isEditable = false }
               } else {
                 document.body.style.cursor = 'crosshair';
               }
-            } else if (event.data?.type === 'UPDATE_CLASSES' && selectedElement) {
-              selectedElement.className = event.data.classes;
-              selectedElement.classList.add('edit-outline-selected');
-              window.parent.postMessage({ type: 'UI_EDITED', html: container.innerHTML }, '*');
-            } else if (event.data?.type === 'UPDATE_TEXT' && selectedElement) {
-              selectedElement.textContent = event.data.text;
-              window.parent.postMessage({ type: 'UI_EDITED', html: container.innerHTML }, '*');
+            } else if (event.data?.type === 'UPDATE_CLASSES') {
+              let el = selectedElement;
+              if (!el || !container.contains(el)) {
+                el = container.querySelector('.edit-outline-selected') || container.querySelector('.edit-outline-hover');
+              }
+              if (el) {
+                selectedElement = el;
+                el.className = event.data.classes;
+                el.classList.add('edit-outline-selected');
+                window.parent.postMessage({ type: 'UI_EDITED', html: container.innerHTML }, '*');
+              }
+            } else if (event.data?.type === 'UPDATE_TEXT') {
+              let el = selectedElement;
+              if (!el || !container.contains(el)) {
+                el = container.querySelector('.edit-outline-selected') || container.querySelector('.edit-outline-hover');
+              }
+              if (el) {
+                selectedElement = el;
+                el.textContent = event.data.text;
+                window.parent.postMessage({ type: 'UI_EDITED', html: container.innerHTML }, '*');
+              }
             } else if (event.data?.type === 'UPDATE_HTML') {
               // Ignore updates from the parent if the user is typing to prevent focus-caret reset loops!
               if (document.activeElement && document.activeElement.contentEditable === "true") {
@@ -224,6 +238,7 @@ export const UIPreview: React.FC<UIPreviewProps> = ({ html, isEditable = false }
     <div className="w-full h-full bg-[#0f0f0f] relative overflow-hidden">
       <iframe
         ref={iframeRef}
+        id="ui-preview-iframe"
         title="UI Preview"
         className="w-full h-full border-none"
         sandbox="allow-scripts"

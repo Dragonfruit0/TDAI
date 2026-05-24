@@ -105,6 +105,76 @@
         "variants",
         "createdAt"
       ]
+    },
+    "SavedDesign": {
+      "title": "SavedDesign",
+      "description": "A customized visual state saved by a user",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "html": {
+          "type": "string"
+        },
+        "parentPrompt": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "userId",
+        "name",
+        "html",
+        "parentPrompt",
+        "createdAt"
+      ]
+    },
+    "ChatbotUsage": {
+      "title": "ChatbotUsage",
+      "description": "Tracking token usage for the chat-based UI modification interactions",
+      "type": "object",
+      "properties": {
+        "userId": {
+          "type": "string"
+        },
+        "userEmail": {
+          "type": "string",
+          "format": "email"
+        },
+        "prompt": {
+          "type": "string"
+        },
+        "usage": {
+          "type": "object",
+          "properties": {
+            "promptTokenCount": { "type": "integer" },
+            "candidatesTokenCount": { "type": "integer" },
+            "totalTokenCount": { "type": "integer" }
+          }
+        },
+        "cost": {
+          "type": "number"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "userId",
+        "userEmail",
+        "prompt",
+        "usage",
+        "cost",
+        "createdAt"
+      ]
     }
   },
   "firestore": {
@@ -119,6 +189,18 @@
         "$ref": "#/entities/Project"
       },
       "description": "Stores generated UI projects"
+    },
+    "/saved_designs/{savedDesignId}": {
+      "schema": {
+        "$ref": "#/entities/SavedDesign"
+      },
+      "description": "Stores user's saved customized layouts"
+    },
+    "/chatbot_usage/{usageId}": {
+      "schema": {
+        "$ref": "#/entities/ChatbotUsage"
+      },
+      "description": "Stores chatbot API model usage logging"
     }
   }
 }

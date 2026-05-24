@@ -1,15 +1,208 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowRight, ChevronLeft, ChevronRight, Sparkles, Loader2, X, User as UserIcon, LogOut, History, Download, MessageSquare, Send, LayoutGrid, ShieldAlert, Lock, CreditCard, Users, TrendingUp, Coins, Activity, Eye, RefreshCw, Trash2, ArrowUpRight, CheckCircle, Palette } from 'lucide-react';
-import { AppView, UIVariant, UserProfile, Project, ChatMessage, UsageMetadata, DesignSuggestion } from './types.ts';
+import { ArrowRight, ChevronLeft, ChevronRight, Sparkles, Loader2, X, User as UserIcon, LogOut, History, Download, MessageSquare, Send, LayoutGrid, ShieldAlert, Lock, CreditCard, Users, TrendingUp, Coins, Activity, Eye, RefreshCw, Trash2, ArrowUpRight, CheckCircle, AlignLeft, AlignCenter, AlignRight, Palette, Sliders, Type, Grid, Check, Paintbrush, Circle, Layers, SlidersHorizontal, MousePointerClick, CheckSquare } from 'lucide-react';
+import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
+import { AppView, UIVariant, UserProfile, Project, ChatMessage, UsageMetadata, DesignSuggestion, SavedDesign } from './types.ts';
 import { generateFollowUpQuestions, generateUIVariants, modifyUI, generateDesignSuggestions } from './services/geminiService.ts';
 import { UIPreview } from './components/UIPreview.tsx';
 import { OnboardingTutorial } from './components/OnboardingTutorial.tsx';
 import DottedGlowBackground from './components/DottedGlowBackground.tsx';
 import { UpgradeModal } from './components/UpgradeModal.tsx';
-import { ApiKeyErrorModal } from './components/ApiKeyErrorModal.tsx';
 import { auth, db, googleProvider, signInWithPopup, signOut, doc, setDoc, getDoc, collection, addDoc, query, where, getDocs, orderBy, handleFirestoreError, OperationType } from './firebase.ts';
 import { onAuthStateChanged } from 'firebase/auth';
+
+const getAppliedColor = (classes: string, type: 'bg' | 'text' | 'border'): string => {
+  const arr = classes.split(/\s+/);
+  // Look for arbitrary values first, e.g., bg-[#123456] or text-[rgb(0,0,0)]
+  const arbitraryQuery = arr.find(c => c.startsWith(`${type}-[`));
+  if (arbitraryQuery) {
+    const match = arbitraryQuery.match(/\[([^\]]+)\]/);
+    if (match) return match[1];
+  }
+  
+  // Look for standard tailwind names, e.g., bg-emerald-500, bg-black, bg-white
+  const standardMap: Record<string, string> = {
+    'black': '#000000',
+    'white': '#ffffff',
+    'transparent': '#00000000',
+    'zinc-950': '#09090b',
+    'zinc-900': '#18181b',
+    'zinc-800': '#27272a',
+    'zinc-700': '#3f3f46',
+    'zinc-600': '#52525b',
+    'zinc-500': '#71717a',
+    'zinc-400': '#a1a1aa',
+    'zinc-300': '#d4d4d8',
+    'zinc-200': '#e4e4e7',
+    'zinc-100': '#f4f4f5',
+    'zinc-50': '#fafafa',
+    'slate-950': '#020617',
+    'slate-900': '#0f172a',
+    'slate-800': '#1e293b',
+    'slate-705': '#334155',
+    'slate-600': '#475569',
+    'slate-500': '#64748b',
+    'slate-400': '#94a3b8',
+    'slate-300': '#cbd5e1',
+    'slate-200': '#e2e8f0',
+    'slate-100': '#f1f5f9',
+    'slate-50': '#f8fafc',
+    'emerald-950': '#022c22',
+    'emerald-900': '#064e3b',
+    'emerald-80': '#065f46',
+    'emerald-700': '#047857',
+    'emerald-600': '#059669',
+    'emerald-500': '#10b981',
+    'emerald-400': '#34d399',
+    'emerald-300': '#6ee7b7',
+    'emerald-200': '#a7f3d0',
+    'emerald-100': '#d1fae5',
+    'emerald-50': '#ecfdf5',
+    'indigo-950': '#1e1b4b',
+    'indigo-900': '#312e81',
+    'indigo-800': '#3730a3',
+    'indigo-700': '#4338ca',
+    'indigo-600': '#4f46e5',
+    'indigo-505': '#6366f1',
+    'indigo-500': '#6366f1',
+    'indigo-400': '#818cf8',
+    'blue-500': '#3b82f6',
+    'red-500': '#ef4444',
+    'yellow-500': '#eab308',
+    'orange-500': '#f97316',
+    'purple-500': '#a855f7',
+    'pink-500': '#ec4899',
+  };
+
+  const stdQuery = arr.find(c => c.startsWith(`${type}-`) && !c.includes('['));
+  if (stdQuery) {
+    const colorName = stdQuery.slice(type.length + 1);
+    if (standardMap[colorName]) {
+      return standardMap[colorName];
+    }
+    if (colorName.includes('white')) return '#ffffff';
+    if (colorName.includes('black')) return '#000000';
+    if (colorName.includes('transparent')) return '#00000000';
+  }
+
+  if (type === 'bg') return '#18181b';
+  if (type === 'text') return '#ffffff';
+  return '#3f3f46';
+};
+
+// Beautiful Interactive Canvas-drawn Color Wheel
+const ColorWheel: React.FC<{
+  color: string;
+  onChange: (hex: string) => void;
+}> = ({ color, onChange }) => {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const size = canvas.width;
+    const cx = size / 2;
+    const cy = size / 2;
+    const r = size / 2;
+
+    const img = ctx.createImageData(size, size);
+    const data = img.data;
+
+    for (let y = 0; y < size; y++) {
+      for (let x = 0; x < size; x++) {
+        const dx = x - cx;
+        const dy = y - cy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        
+        if (dist <= r) {
+          let angle = Math.atan2(dy, dx);
+          if (angle < 0) angle += 2 * Math.PI;
+          
+          const hue = (angle * 180) / Math.PI;
+          const saturation = dist / r;
+          const lightness = 0.5;
+          
+          let rVal, gVal, bVal;
+          const q = lightness < 0.5 ? lightness * (1 + saturation) : lightness + saturation - lightness * saturation;
+          const p = 2 * lightness - q;
+          
+          const hueToRgb = (t: number) => {
+            if (t < 0) t += 1;
+            if (t > 1) t -= 1;
+            if (t < 1/6) return p + (q - p) * 6 * t;
+            if (t < 1/2) return q;
+            if (t < 2/3) return p + (q - p) * (2/3 - t) * 6;
+            return p;
+          };
+
+          rVal = hueToRgb(hue / 360 + 1/3);
+          gVal = hueToRgb(hue / 360);
+          bVal = hueToRgb(hue / 360 - 1/3);
+
+          const idx = (y * size + x) * 4;
+          data[idx] = Math.round(rVal * 255);
+          data[idx + 1] = Math.round(gVal * 255);
+          data[idx + 2] = Math.round(bVal * 255);
+          data[idx + 3] = 255;
+        } else {
+          const idx = (y * size + x) * 4;
+          data[idx + 3] = 0;
+        }
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  }, []);
+
+  const handlePointer = (e: React.MouseEvent<HTMLCanvasElement> | React.TouchEvent<HTMLCanvasElement>) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    let clientX = 0;
+    let clientY = 0;
+    if ('touches' in e) {
+      if (e.touches.length === 0) return;
+      clientX = e.touches[0].clientX;
+      clientY = e.touches[0].clientY;
+    } else {
+      clientX = e.clientX;
+      clientY = e.clientY;
+    }
+
+    const x = Math.floor(clientX - rect.left);
+    const y = Math.floor(clientY - rect.top);
+    if (x >= 0 && x < canvas.width && y >= 0 && y < canvas.height) {
+      const p = ctx.getImageData(x, y, 1, 1).data;
+      if (p[3] > 0) {
+        const hex = '#' + ((1 << 24) + (p[0] << 16) + (p[1] << 8) + p[2]).toString(16).slice(1);
+        onChange(hex);
+      }
+    }
+  };
+
+  return (
+    <div className="flex flex-col items-center justify-center relative my-2">
+      <div className="relative p-1 bg-white/5 border border-white/10 rounded-full shadow-2xl overflow-hidden cursor-crosshair">
+        <canvas
+          ref={canvasRef}
+          width={130}
+          height={130}
+          className="rounded-full"
+          onMouseDown={handlePointer}
+          onMouseMove={(e) => { if (e.buttons === 1) handlePointer(e); }}
+          onTouchStart={handlePointer}
+          onTouchMove={handlePointer}
+        />
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-black border-2 border-white rounded-full pointer-events-none shadow" />
+      </div>
+      <span className="text-[9px] text-zinc-500 mt-1 uppercase font-mono tracking-wider">Drag to select dynamic color</span>
+    </div>
+  );
+};
 
 const App: React.FC = () => {
   const [view, setView] = useState<AppView>(AppView.LANDING);
@@ -46,7 +239,6 @@ const App: React.FC = () => {
   const [generationsToday, setGenerationsToday] = useState<number>(0);
   const [isLoadingLimits, setIsLoadingLimits] = useState<boolean>(false);
   const [showUpgradeModal, setShowUpgradeModal] = useState<boolean>(false);
-  const [apiKeyErrorDetails, setApiKeyErrorDetails] = useState<string | null>(null);
 
   // Onboarding state
   const [showOnboarding, setShowOnboarding] = useState(false);
@@ -224,6 +416,61 @@ const App: React.FC = () => {
     }
   };
 
+  const [profileTab, setProfileTab] = useState<'projects' | 'saves'>('projects');
+  const [userSavedDesigns, setUserSavedDesigns] = useState<SavedDesign[]>([]);
+  const [isLoadingSavedDesigns, setIsLoadingSavedDesigns] = useState(false);
+  const [isSavingDesign, setIsSavingDesign] = useState(false);
+  const [showSaveNamingModal, setShowSaveNamingModal] = useState(false);
+  const [saveDesignName, setSaveDesignName] = useState('');
+
+  const fetchSavedDesigns = async () => {
+    if (!user) return;
+    setIsLoadingSavedDesigns(true);
+    try {
+      const q = query(collection(db, 'saved_designs'), where('userId', '==', user.uid));
+      const querySnapshot = await getDocs(q);
+      const designs: SavedDesign[] = [];
+      querySnapshot.forEach((doc) => {
+        designs.push({ id: doc.id, ...doc.data() } as SavedDesign);
+      });
+      // Sort by createdAt descending
+      designs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      setUserSavedDesigns(designs);
+    } catch (error) {
+      console.error("Error loading saved designs", error);
+    } finally {
+      setIsLoadingSavedDesigns(false);
+    }
+  };
+
+  const handleSaveDesign = async () => {
+    if (!user) return;
+    if (!saveDesignName.trim()) {
+      alert("Please provide a name for this design.");
+      return;
+    }
+    setIsSavingDesign(true);
+    try {
+      const designData: Omit<SavedDesign, 'id'> = {
+        userId: user.uid,
+        name: saveDesignName.trim(),
+        html: builderHtml,
+        parentPrompt: prompt || 'Custom Design Modification',
+        createdAt: new Date().toISOString()
+      };
+      await addDoc(collection(db, 'saved_designs'), designData);
+      alert("Design saved to your history successfully!");
+      setSaveDesignName('');
+      setShowSaveNamingModal(false);
+      fetchSavedDesigns();
+    } catch (error) {
+      console.error("Error saving design:", error);
+      alert("Failed to save design to your history.");
+    } finally {
+      setIsSavingDesign(false);
+    }
+  };
+
   // Generation state
   const [isGeneratingUI, setIsGeneratingUI] = useState(false);
   const [variants, setVariants] = useState<UIVariant[]>([]);
@@ -234,6 +481,8 @@ const App: React.FC = () => {
   // Admin Dashboard State
   const [adminUsers, setAdminUsers] = useState<UserProfile[]>([]);
   const [adminProjects, setAdminProjects] = useState<Project[]>([]);
+  const [adminChatbotUsage, setAdminChatbotUsage] = useState<any[]>([]);
+  const [adminLogTab, setAdminLogTab] = useState<'projects' | 'chatbot'>('projects');
   const [isAdminLoading, setIsAdminLoading] = useState(false);
   const [selectedAdminUser, setSelectedAdminUser] = useState<UserProfile | null>(null);
 
@@ -261,6 +510,17 @@ const App: React.FC = () => {
         handleFirestoreError(err, OperationType.GET, 'projects');
       }
       setAdminProjects(projectsList);
+
+      let chatbotList: any[] = [];
+      try {
+        const chatbotSnap = await getDocs(collection(db, 'chatbot_usage'));
+        chatbotSnap.forEach(d => {
+          chatbotList.push({ id: d.id, ...d.data() });
+        });
+      } catch (err) {
+        handleFirestoreError(err, OperationType.GET, 'chatbot_usage');
+      }
+      setAdminChatbotUsage(chatbotList);
     } catch (err) {
       console.error("Error loading admin stats", err);
     } finally {
@@ -315,26 +575,77 @@ const App: React.FC = () => {
   const [chatInput, setChatInput] = useState('');
   const [isChatGenerating, setIsChatGenerating] = useState(false);
 
-  // Multi-page state system
-  const [pages, setPages] = useState<{ name: string; html: string }[]>([
-    { name: 'Home', html: '' }
-  ]);
-  const [activePageIndex, setActivePageIndex] = useState<number>(0);
-  
-  // Track active index in a Ref to safeguard event listener captures
-  const activePageIndexRef = useRef(0);
+  // Extra states for advanced color editing
+  const [colorEditingType, setColorEditingType] = useState<'bg' | 'text' | 'border' | null>(null);
+  const [bgInputHex, setBgInputHex] = useState('#18181b');
+  const [textInputHex, setTextInputHex] = useState('#ffffff');
+  const [borderInputHex, setBorderInputHex] = useState('#3f3f46');
+
   useEffect(() => {
-    activePageIndexRef.current = activePageIndex;
-  }, [activePageIndex]);
+    if (selectedElement) {
+      setBgInputHex(getAppliedColor(selectedElement.classes, 'bg'));
+      setTextInputHex(getAppliedColor(selectedElement.classes, 'text'));
+      setBorderInputHex(getAppliedColor(selectedElement.classes, 'border'));
+    } else {
+      setColorEditingType(null);
+    }
+  }, [selectedElement?.classes]);
+
+  const applyArbitraryColor = (type: 'bg' | 'text' | 'border', colorVal: string) => {
+    if (!selectedElement) return;
+    
+    let cleaned = colorVal.trim();
+    if (cleaned.startsWith('#')) {
+      // is hex
+    } else if (/^[0-9a-fA-F]{3,8}$/.test(cleaned)) {
+      cleaned = '#' + cleaned;
+    } else if (cleaned === '') {
+      cleaned = type === 'bg' ? '#18181b' : type === 'text' ? '#ffffff' : '#3f3f46';
+    }
+    
+    const newClass = `${type}-[${cleaned}]`;
+    
+    if (type === 'bg') {
+      setBgInputHex(cleaned);
+      applyStyleClass(['bg-'], newClass);
+    } else if (type === 'text') {
+      setTextInputHex(cleaned);
+      applyStyleClass(['text-'], newClass);
+    } else if (type === 'border') {
+      setBorderInputHex(cleaned);
+      
+      let currentArr = selectedElement.classes.split(' ').filter(c => c.trim().length > 0);
+      if (!currentArr.includes('border') && !currentArr.some(c => c.startsWith('border-') && !c.startsWith('border-['))) {
+        currentArr.push('border');
+      }
+      currentArr = currentArr.filter(c => !c.startsWith('border-[') && !(c.startsWith('border-') && c !== 'border' && !['border-none', 'border-2', 'border-4', 'border-8'].includes(c)));
+      currentArr.push(newClass);
+      handleUpdateClasses(currentArr.join(' '));
+    }
+  };
+
+  const applyPresetPalette = (bg: string, text: string, border: string) => {
+    if (!selectedElement) return;
+    setBgInputHex(bg);
+    setTextInputHex(text);
+    setBorderInputHex(border);
+    
+    let currentArr = selectedElement.classes.split(' ').filter(c => c.trim().length > 0);
+    
+    currentArr = currentArr.filter(c => !c.startsWith('bg-') && !c.startsWith('text-') && !c.startsWith('border-[') && !c.startsWith('border-') && c !== 'border');
+    
+    currentArr.push(`bg-[${bg}]`);
+    currentArr.push(`text-[${text}]`);
+    currentArr.push('border');
+    currentArr.push(`border-[${border}]`);
+    
+    handleUpdateClasses(currentArr.join(' '));
+  };
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
       if (event.data?.type === 'UI_EDITED' && event.data.html) {
-        const newHtml = event.data.html;
-        setBuilderHtml(newHtml);
-        setPages(prev => prev.map((p, idx) => 
-          idx === activePageIndexRef.current ? { ...p, html: newHtml } : p
-        ));
+        setBuilderHtml(event.data.html);
       } else if (event.data?.type === 'ELEMENT_SELECTED') {
         setSelectedElement({
           tagName: event.data.tagName,
@@ -365,8 +676,8 @@ const App: React.FC = () => {
     if (!selectedElement) return;
     setSelectedElement(prev => prev ? { ...prev, classes: newClasses } : null);
     
-    // Post back to iframe
-    const iframe = document.querySelector('iframe');
+    // Post back to iframe with high precision ID targeting
+    const iframe = document.getElementById('ui-preview-iframe') as HTMLIFrameElement | null;
     if (iframe?.contentWindow) {
       iframe.contentWindow.postMessage({ type: 'UPDATE_CLASSES', classes: newClasses }, '*');
     }
@@ -376,59 +687,11 @@ const App: React.FC = () => {
     if (!selectedElement) return;
     setSelectedElement(prev => prev ? { ...prev, textContent: newText } : null);
     
-    // Post back to iframe
-    const iframe = document.querySelector('iframe');
+    // Post back to iframe with high precision ID targeting
+    const iframe = document.getElementById('ui-preview-iframe') as HTMLIFrameElement | null;
     if (iframe?.contentWindow) {
       iframe.contentWindow.postMessage({ type: 'UPDATE_TEXT', text: newText }, '*');
     }
-  };
-
-  const parseHexColor = (classes: string, type: 'bg' | 'text' | 'border'): string => {
-    // Search for explicit custom style wrapper [color] (e.g., bg-[#ff00bb] or text-[#123123])
-    const regex = new RegExp(`${type}-\\[(#[a-fA-F0-9]{3,8}|[^]]+)\\]`);
-    const match = classes.match(regex);
-    if (match) {
-      return match[1];
-    }
-    
-    // Fallback dictionary for common standard Tailwind color classes
-    if (classes.includes(`${type}-transparent`)) return 'transparent';
-    if (classes.includes(`${type}-black`)) return '#000000';
-    if (classes.includes(`${type}-white`)) return '#ffffff';
-    if (classes.includes(`${type}-zinc-900`)) return '#18181b';
-    if (classes.includes(`${type}-zinc-800`)) return '#27272a';
-    if (classes.includes(`${type}-zinc-700`)) return '#3f3f46';
-    if (classes.includes(`${type}-zinc-600`)) return '#52525b';
-    if (classes.includes(`${type}-zinc-500`)) return '#71717a';
-    if (classes.includes(`${type}-zinc-400`)) return '#a1a1aa';
-    if (classes.includes(`${type}-zinc-300`)) return '#d4d4d8';
-    if (classes.includes(`${type}-emerald-500`)) return '#10b981';
-    if (classes.includes(`${type}-blue-500`)) return '#3b82f6';
-    if (classes.includes(`${type}-indigo-600`)) return '#4f46e5';
-    if (classes.includes(`${type}-purple-600`)) return '#9333ea';
-    if (classes.includes(`${type}-red-500`)) return '#ef4444';
-    if (classes.includes(`${type}-amber-500`)) return '#f59e0b';
-    
-    return '';
-  };
-
-  const updateDynamicColor = (type: 'bg' | 'text' | 'border', hexOrUtil: string) => {
-    if (!selectedElement) return;
-    let currentClasses = selectedElement.classes.split(' ').filter(c => c.trim().length > 0);
-    
-    // Clear out standard patterns for background, text, or border classes
-    const pfxs = [`${type}-`, `hover:${type}-`, `focus:${type}-`];
-    currentClasses = currentClasses.filter(c => !pfxs.some(p => c.startsWith(p)));
-    
-    if (hexOrUtil) {
-      if (hexOrUtil.startsWith('#') || hexOrUtil.startsWith('rgb') || hexOrUtil.startsWith('hsl')) {
-        currentClasses.push(`${type}-[${hexOrUtil}]`);
-      } else {
-        currentClasses.push(`${type}-${hexOrUtil}`);
-      }
-    }
-    
-    handleUpdateClasses(currentClasses.join(' '));
   };
 
   const applyStyleClass = (categoryPrefixes: string[], activeClass: string) => {
@@ -502,13 +765,9 @@ const App: React.FC = () => {
       }
 
       setView(AppView.PREVIEW);
-    } catch (error: any) {
+    } catch (error) {
       console.error(error);
-      if (error?.isApiKeyRestricted || error?.message?.includes('API_KEY_RESTRICTED') || error?.message?.includes('API key')) {
-        setApiKeyErrorDetails(error.message || 'Restricted Key Error');
-      } else {
-        alert("Failed to generate UI: " + (error?.message || "Unknown error"));
-      }
+      alert("Failed to generate UI.");
       setView(AppView.LANDING);
     } finally {
       setIsGeneratingUI(false);
@@ -524,7 +783,7 @@ const App: React.FC = () => {
       {/* Header / Auth */}
       <header className="absolute top-0 left-0 right-0 p-6 flex justify-between items-center z-50">
         <div className="flex items-center gap-3">
-          <img src="/logo.jpeg" alt="TheDesignAI Logo" className="w-10 h-10 rounded-xl shadow-lg border border-white/10" />
+          <img src="/tdai_logo.jpeg" alt="TheDesignAI Logo" className="w-10 h-10 rounded-xl shadow-lg border border-white/10" />
           <div className="font-bold text-[15px] tracking-tighter flex flex-col leading-none">
             <span>TheDesignAI</span>
             <span className="text-zinc-500 font-normal text-[10px]">by Anqair</span>
@@ -568,6 +827,7 @@ const App: React.FC = () => {
                 <button 
                   onClick={() => {
                     fetchUserProjects();
+                    fetchSavedDesigns();
                     setView(AppView.PROFILE);
                   }}
                   className="flex items-center gap-2 bg-white/10 hover:bg-white/20 transition-colors px-4 py-2 rounded-full text-sm font-medium border border-white/10"
@@ -689,7 +949,7 @@ const App: React.FC = () => {
       {/* Logo Header */}
       <div className="absolute top-0 left-0 right-0 p-6 flex justify-center z-50 animate-pulse">
         <div className="flex items-center gap-3 bg-white/5 backdrop-blur-xl px-4 py-2 rounded-full border border-white/10">
-          <img src="/logo.jpeg" alt="Logo" className="w-6 h-6 rounded-lg shadow-2xl" />
+          <img src="/tdai_logo.jpeg" alt="Logo" className="w-6 h-6 rounded-lg shadow-2xl" />
           <span className="font-bold text-sm tracking-tighter">TheDesignAI</span>
         </div>
       </div>
@@ -730,7 +990,7 @@ const App: React.FC = () => {
         <header className="h-16 px-6 flex items-center justify-between bg-black/50 backdrop-blur-md z-50 border-b border-white/10 shrink-0">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
-              <img src="/logo.jpeg" alt="Logo" className="w-8 h-8 rounded-lg" />
+              <img src="/tdai_logo.jpeg" alt="Logo" className="w-8 h-8 rounded-lg" />
               <span className="font-bold tracking-tighter text-[15px] hidden sm:block">TheDesignAI</span>
             </div>
             <div className="h-4 w-px bg-zinc-800" />
@@ -795,8 +1055,6 @@ const App: React.FC = () => {
             <div className="flex items-center gap-2 shrink-0">
               <button 
                 onClick={() => {
-                  setPages([{ name: 'Home', html: currentVariant.html }]);
-                  setActivePageIndex(0);
                   setBuilderHtml(currentVariant.html);
                   setView(AppView.BUILDER);
                 }} 
@@ -822,28 +1080,31 @@ const App: React.FC = () => {
     
     try {
       const result = await modifyUI(builderHtml, userMsg);
-      // Update HTML content
-      setBuilderHtml(result.html);
-      
-      // Update the active page's html in our page system!
-      setPages(prev => prev.map((p, idx) => 
-        idx === activePageIndex ? { ...p, html: result.html } : p
-      ));
+      const updatedHtml = result.data;
+      const usage = result.usage;
+      const cost = calculateCost(usage);
 
-      // Append AI Reasoning to chat interaction log
-      setChatMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: result.reasoning }]);
-    } catch (error: any) {
-      console.error(error);
-      if (error?.isApiKeyRestricted || error?.message?.includes('API_KEY_RESTRICTED') || error?.message?.includes('API key')) {
-        setApiKeyErrorDetails(error.message || 'Restricted Key Error');
-        setChatMessages(prev => [...prev, { 
-          id: Date.now().toString(), 
-          role: 'ai', 
-          content: `⚠️ **API Key Restriction Detected**\n\nYour Gemini API Key is restricted to "Agent Platform (Vertex) API" only in the Google Cloud Console. Standard Gemini operations require the "Generative Language API" to be enabled.\n\n*Click the popping credentials instructions modal or troubleshoot using the button to solve this issue.*` 
-        }]);
-      } else {
-        setChatMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: `Sorry, I encountered an error while updating the design: ${error?.message || "Unknown error"}` }]);
+      setBuilderHtml(updatedHtml);
+      setChatMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: 'I have updated the design based on your request.' }]);
+
+      if (user) {
+        try {
+          const logData = {
+            userId: user.uid,
+            userEmail: user.email,
+            prompt: userMsg,
+            usage,
+            cost,
+            createdAt: new Date().toISOString()
+          };
+          await addDoc(collection(db, 'chatbot_usage'), logData);
+        } catch (dbError) {
+          console.error("Failed to log chatbot token usage", dbError);
+        }
       }
+    } catch (error) {
+      console.error(error);
+      setChatMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: 'Sorry, I encountered an error while updating the design.' }]);
     } finally {
       setIsChatGenerating(false);
     }
@@ -883,7 +1144,7 @@ const App: React.FC = () => {
         <header className="h-16 px-6 flex items-center justify-between bg-black/50 backdrop-blur-md z-50 border-b border-white/10 shrink-0">
           <div className="flex items-center gap-4">
             <div className="flex items-center gap-2">
-              <img src="/logo.jpeg" alt="Logo" className="w-8 h-8 rounded-lg" />
+              <img src="/tdai_logo.jpeg" alt="Logo" className="w-8 h-8 rounded-lg" />
               <span className="font-bold tracking-tighter text-[15px] hidden sm:block">TheDesignAI</span>
             </div>
             <div className="h-4 w-px bg-zinc-800" />
@@ -916,6 +1177,19 @@ const App: React.FC = () => {
             >
               <Download className="w-4 h-4" /> Export HTML
             </button>
+            {user && (
+              <button 
+                id="save-design-button"
+                onClick={() => {
+                  setSaveDesignName(prompt ? `${prompt.slice(0, 30)} - Revised` : 'My Edited Version');
+                  setShowSaveNamingModal(true);
+                }}
+                className="px-4 py-2 rounded-full text-sm font-bold bg-emerald-505 bg-emerald-500 hover:bg-emerald-400 text-black transition-all flex items-center gap-1.5 shadow-lg shadow-emerald-550/10"
+              >
+                <Check className="w-4 h-4" />
+                <span>Save Design</span>
+              </button>
+            )}
           </div>
         </header>
         <div className="flex-1 relative w-full overflow-hidden">
@@ -1089,208 +1363,179 @@ const App: React.FC = () => {
                 </div>
 
                 {/* Point-and-Click Visual Presets Controller */}
-                <div className="space-y-4">
-                  <div className="border-t border-white/5 pt-4">
-                     <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-400 mb-3">Graphical Styling Panel</h4>
+                 <div className="space-y-4">
+                  <div className="border-t border-white/10 pt-4 flex items-center gap-2">
+                     <Paintbrush className="w-4 h-4 text-emerald-400" />
+                     <h4 className="text-[10px] font-black uppercase tracking-widest text-zinc-350">Graphical Styling Panel</h4>
+                  </div>
+
+                  {/* ADVANCED COLOR PALETTE PANEL */}
+                  <div className="bg-black/40 border border-white/5 rounded-xl p-3.5 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1">
+                        <Palette className="w-3.5 h-3.5 text-emerald-400" />
+                        Color Palette
+                      </span>
+                      <span className="text-[9px] text-zinc-500 bg-white/5 px-2 py-0.5 rounded font-mono">
+                        {selectedElement.classes.includes('bg-[') || selectedElement.classes.includes('text-[') ? 'Arbitrary Hex' : 'Theme Standard'}
+                      </span>
+                    </div>
+
+                    {/* Palette Switcher Bar (Segmented Controls) */}
+                    <div className="grid grid-cols-3 gap-1 bg-white/5 p-1 rounded-lg">
+                      {[
+                        { label: 'Background', type: 'bg' as const, color: bgInputHex },
+                        { label: 'Text', type: 'text' as const, color: textInputHex },
+                        { label: 'Border', type: 'border' as const, color: borderInputHex }
+                      ].map(tab => {
+                        const isActive = (colorEditingType || 'bg') === tab.type;
+                        return (
+                          <button
+                            key={tab.type}
+                            type="button"
+                            onClick={() => setColorEditingType(tab.type)}
+                            className={`py-1.5 px-1 rounded text-[10px] font-semibold transition-all flex flex-col items-center gap-1 cursor-pointer leading-none ${isActive ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'text-zinc-400 hover:text-white hover:bg-white/5 border border-transparent'}`}
+                          >
+                            <span>{tab.label}</span>
+                            <span 
+                              className="w-4 h-2 rounded-full border border-white/10 inline-block"
+                              style={{ backgroundColor: tab.color }}
+                            />
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* Color Wheel & Hex Modifier */}
+                    <div className="bg-white/[0.02] border border-white/5 p-3 rounded-lg flex flex-col items-center justify-center space-y-3">
+                      <div className="text-[10px] font-bold text-zinc-400 uppercase tracking-widest leading-none">
+                        Editing {(colorEditingType || 'bg').toUpperCase()} Color
+                      </div>
+
+                      {/* Interactive Canvas Color Wheel */}
+                      <ColorWheel 
+                        color={((colorEditingType || 'bg') === 'bg' ? bgInputHex : (colorEditingType || 'bg') === 'text' ? textInputHex : borderInputHex)} 
+                        onChange={(hex) => applyArbitraryColor((colorEditingType || 'bg'), hex)} 
+                      />
+
+                      {/* Input fields synced in real-time */}
+                      <div className="flex items-center gap-2 w-full">
+                        {/* Native Trigger Color Swatch */}
+                        <div className="relative w-8 h-8 rounded-lg border border-white/20 shadow overflow-hidden shrink-0 cursor-pointer group flex items-center justify-center">
+                          <input 
+                            type="color" 
+                            value={((colorEditingType || 'bg') === 'bg' ? bgInputHex : (colorEditingType || 'bg') === 'text' ? textInputHex : borderInputHex)}
+                            onChange={(e) => applyArbitraryColor((colorEditingType || 'bg'), e.target.value)}
+                            className="absolute -inset-1 w-10 h-10 cursor-pointer opacity-0"
+                          />
+                          <div 
+                            className="w-full h-full transition-transform group-hover:scale-110" 
+                            style={{ backgroundColor: ((colorEditingType || 'bg') === 'bg' ? bgInputHex : (colorEditingType || 'bg') === 'text' ? textInputHex : borderInputHex) }}
+                          />
+                        </div>
+
+                        {/* Hex Input Text Field */}
+                        <div className="relative flex-1">
+                          <span className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[11px] font-bold text-zinc-500 font-mono">#</span>
+                          <input 
+                            type="text" 
+                            maxLength={7}
+                            value={((colorEditingType || 'bg') === 'bg' ? bgInputHex : (colorEditingType || 'bg') === 'text' ? textInputHex : borderInputHex).replace('#', '')}
+                            onChange={(e) => applyArbitraryColor((colorEditingType || 'bg'), e.target.value)}
+                            placeholder="FFFFFF"
+                            className="w-full bg-black/60 border border-white/10 rounded-lg pl-7 pr-3 py-1.5 text-xs text-zinc-200 focus:outline-none focus:border-emerald-500/50 font-mono"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Cohesive Master Palettes presets */}
+                    <div className="space-y-2 pt-1">
+                      <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-wider block">Unified Theme Presets (Click to Paint)</span>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        {[
+                          { bg: '#030712', text: '#fda4af', border: '#ec4899', label: 'Sunset Cyber' },
+                          { bg: '#064e3b', text: '#d1fae5', border: '#059669', label: 'Nordic Emerald' },
+                          { bg: '#2e1065', text: '#e9d5ff', border: '#a855f7', label: 'Neon Purple' },
+                          { bg: '#1e293b', text: '#f1f5f9', border: '#475569', label: 'Classic Steel' },
+                          { bg: '#451a03', text: '#fef3c7', border: '#f97316', label: 'Amber Glow' },
+                          { bg: '#fafafa', text: '#18181b', border: '#e4e4e7', label: 'Clean Paper' }
+                        ].map((preset, idx) => {
+                          const isCurrentMatch = bgInputHex === preset.bg && textInputHex === preset.text;
+                          return (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => applyPresetPalette(preset.bg, preset.text, preset.border)}
+                              className={`p-2 rounded-lg border text-left transition-all hover:bg-white/5 cursor-pointer flex flex-col gap-1.5 ${isCurrentMatch ? 'bg-emerald-500/10 border-emerald-500/40' : 'bg-white/[0.02] border-white/5'}`}
+                            >
+                              <div className="flex items-center justify-between">
+                                <span className="text-[10px] font-bold text-zinc-200 truncate">{preset.label}</span>
+                                {isCurrentMatch && <Check className="w-3 h-3 text-emerald-400 shrink-0" />}
+                              </div>
+                              <div className="flex gap-1">
+                                <span className="w-4 h-3 rounded" style={{ backgroundColor: preset.bg }} />
+                                <span className="w-4 h-3 rounded" style={{ backgroundColor: preset.text }} />
+                                <span className="w-4 h-3 rounded" style={{ backgroundColor: preset.border }} />
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
                   </div>
 
                   {/* Category: Padding/Spacing */}
                   <div className="space-y-1.5">
                     <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Padding Spacing</span>
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="grid grid-cols-3 gap-1.5">
                       {[
-                        { label: 'None', val: '' },
-                        { label: 'Sm', val: 'p-2' },
-                        { label: 'Md', val: 'p-4' },
-                        { label: 'Lg', val: 'p-6' },
-                        { label: 'XL', val: 'p-8' },
-                        { label: 'Inline Pill', val: 'px-4 py-2' }
+                        { label: 'None', val: '', class: 'p-0' },
+                        { label: 'Compact', val: 'p-2', class: 'p-2' },
+                        { label: 'Normal', val: 'p-4', class: 'p-4' },
+                        { label: 'Roomy', val: 'p-6', class: 'p-6' },
+                        { label: 'Spacious', val: 'p-8', class: 'p-8' },
+                        { label: 'Side Pill', val: 'px-6 py-2.5', class: 'px-4 py-2' }
                       ].map(item => {
-                        const isCurrent = selectedElement.classes.includes(item.val) && item.val !== '';
+                        const isCurrent = selectedElement.classes.includes(item.class) || (item.val === '' && !selectedElement.classes.includes('p-'));
                         return (
                           <button
                             key={item.label}
                             type="button"
                             onClick={() => applyStyleClass(['p-', 'px-', 'py-'], item.val)}
-                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all cursor-pointer border ${isCurrent ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-white/5 border-white/5 text-zinc-450 hover:bg-white/10 hover:text-white'}`}
+                            className={`p-2 rounded-lg text-[10px] font-medium transition-all cursor-pointer border flex items-center justify-start ${isCurrent ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-white/5 border-white/5 text-zinc-400 hover:bg-white/10 hover:text-white'}`}
                           >
-                            {item.label}
+                            <span className={`w-3.5 h-3.5 border border-dashed rounded text-[8px] mr-1.5 flex items-center justify-center shrink-0 ${isCurrent ? 'border-emerald-500/60 bg-emerald-500/10' : 'border-zinc-600 bg-zinc-850'}`}>
+                              {item.label === 'None' ? '■' : '▫'}
+                            </span>
+                            <span className="truncate">{item.label}</span>
                           </button>
                         );
                       })}
-                    </div>
-                  </div>
-                  
-                  {/* Category: Dynamic Color Palette & Color Wheel */}
-                  <div className="space-y-4 border-t border-white/5 pt-4">
-                    <span className="text-[10px] font-black uppercase tracking-widest text-zinc-400 block">Dynamic Element Palette</span>
-                    
-                    <div className="grid grid-cols-1 gap-4 bg-white/[0.02] border border-white/5 p-4 rounded-xl">
-                      {/* Sub-item: Background Color */}
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div 
-                            className="w-5 h-5 rounded-full border border-white/10 shadow-sm transition-transform hover:scale-110 cursor-pointer"
-                            style={{ backgroundColor: parseHexColor(selectedElement.classes, 'bg') || 'transparent' }}
-                            title="Current Background"
-                          />
-                          <div className="flex flex-col">
-                            <span className="text-[11px] font-bold text-zinc-300">Background</span>
-                            <span className="text-[9px] font-mono text-zinc-500 uppercase">
-                              {parseHexColor(selectedElement.classes, 'bg') || 'Not Set'}
-                            </span>
-                          </div>
-                        </div>
-                        
-                        <div className="flex items-center gap-1.5 justify-end">
-                          {/* Color Wheel Selector */}
-                          <div className="relative w-7 h-7 rounded-lg overflow-hidden border border-white/10 hover:border-emerald-500/50 transition-colors bg-white/5 flex items-center justify-center cursor-pointer">
-                            <input 
-                              type="color" 
-                              value={parseHexColor(selectedElement.classes, 'bg').startsWith('#') ? parseHexColor(selectedElement.classes, 'bg') : '#000000'}
-                              onChange={(e) => updateDynamicColor('bg', e.target.value)}
-                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full scale-150"
-                            />
-                            <Palette className="w-3.5 h-3.5 text-zinc-400 pointer-events-none" />
-                          </div>
-                          {/* Hex text input */}
-                          <input 
-                            type="text"
-                            placeholder="#000000"
-                            value={parseHexColor(selectedElement.classes, 'bg')}
-                            onChange={(e) => updateDynamicColor('bg', e.target.value)}
-                            className="w-20 bg-black/60 border border-white/10 rounded px-2 py-1 text-[11px] font-mono text-center text-emerald-400 focus:outline-none focus:border-emerald-500/40"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Sub-item: Text Color */}
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div 
-                            className="w-5 h-5 rounded-full border border-white/10 shadow-sm transition-transform hover:scale-110 cursor-pointer"
-                            style={{ backgroundColor: parseHexColor(selectedElement.classes, 'text') || 'transparent' }}
-                            title="Current Text"
-                          />
-                          <div className="flex flex-col">
-                            <span className="text-[11px] font-bold text-zinc-300 font-sans">Text Color</span>
-                            <span className="text-[9px] font-mono text-zinc-500 uppercase">
-                              {parseHexColor(selectedElement.classes, 'text') || 'Not Set'}
-                            </span>
-                          </div>
-                        </div>
-                        
-                        <div className="flex items-center gap-1.5 justify-end">
-                          {/* Color Wheel Selector */}
-                          <div className="relative w-7 h-7 rounded-lg overflow-hidden border border-white/10 hover:border-emerald-500/50 transition-colors bg-white/5 flex items-center justify-center cursor-pointer">
-                            <input 
-                              type="color" 
-                              value={parseHexColor(selectedElement.classes, 'text').startsWith('#') ? parseHexColor(selectedElement.classes, 'text') : '#ffffff'}
-                              onChange={(e) => updateDynamicColor('text', e.target.value)}
-                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full scale-150"
-                            />
-                            <Palette className="w-3.5 h-3.5 text-zinc-400 pointer-events-none" />
-                          </div>
-                          {/* Hex text input */}
-                          <input 
-                            type="text"
-                            placeholder="#ffffff"
-                            value={parseHexColor(selectedElement.classes, 'text')}
-                            onChange={(e) => updateDynamicColor('text', e.target.value)}
-                            className="w-20 bg-black/60 border border-white/10 rounded px-2 py-1 text-[11px] font-mono text-center text-emerald-400 focus:outline-none focus:border-emerald-500/40"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Sub-item: Border Color */}
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2">
-                          <div 
-                            className="w-5 h-5 rounded-full border border-white/10 shadow-sm transition-transform hover:scale-110 cursor-pointer"
-                            style={{ backgroundColor: parseHexColor(selectedElement.classes, 'border') || 'transparent' }}
-                            title="Current Border"
-                          />
-                          <div className="flex flex-col">
-                            <span className="text-[11px] font-bold text-zinc-300">Border Color</span>
-                            <span className="text-[9px] font-mono text-zinc-500 uppercase">
-                              {parseHexColor(selectedElement.classes, 'border') || 'Not Set'}
-                            </span>
-                          </div>
-                        </div>
-                        
-                        <div className="flex items-center gap-1.5 justify-end">
-                          {/* Color Wheel Selector */}
-                          <div className="relative w-7 h-7 rounded-lg overflow-hidden border border-white/10 hover:border-emerald-500/50 transition-colors bg-white/5 flex items-center justify-center cursor-pointer">
-                            <input 
-                              type="color" 
-                              value={parseHexColor(selectedElement.classes, 'border').startsWith('#') ? parseHexColor(selectedElement.classes, 'border') : '#ffffff'}
-                              onChange={(e) => updateDynamicColor('border', e.target.value)}
-                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full scale-150"
-                            />
-                            <Palette className="w-3.5 h-3.5 text-zinc-400 pointer-events-none" />
-                          </div>
-                          {/* Hex text input */}
-                          <input 
-                            type="text"
-                            placeholder="#ffffff"
-                            value={parseHexColor(selectedElement.classes, 'border')}
-                            onChange={(e) => updateDynamicColor('border', e.target.value)}
-                            className="w-20 bg-black/60 border border-white/10 rounded px-2 py-1 text-[11px] font-mono text-center text-emerald-400 focus:outline-none focus:border-emerald-500/40"
-                          />
-                        </div>
-                      </div>
-
-                      {/* Brand Quick Palettes presets list */}
-                      <div className="border-t border-white/5 pt-3 mt-1 space-y-2">
-                        <span className="text-[9px] font-bold text-zinc-500 uppercase tracking-widest block">Palette Presets (Branding)</span>
-                        <div className="flex items-center gap-1.5 flex-wrap">
-                          {[
-                            { name: 'Pure Dark', bg: '#09090b', text: '#ffffff', bdr: '#27272a' },
-                            { name: 'Cyber Neon', bg: '#030712', text: '#34d399', bdr: '#059669' },
-                            { name: 'Warm Amber', bg: '#1c1917', text: '#fcd34d', bdr: '#d97706' },
-                            { name: 'Clean Light', bg: '#ffffff', text: '#09090b', bdr: '#cbd5e1' },
-                            { name: 'Nordic Snow', bg: '#f8fafc', text: '#0f172a', bdr: '#cbd5e1' },
-                            { name: 'Indigo Core', bg: '#eff6ff', text: '#2563eb', bdr: '#3b82f6' }
-                          ].map(preset => (
-                            <button
-                              key={preset.name}
-                              type="button"
-                              onClick={() => {
-                                updateDynamicColor('bg', preset.bg);
-                                updateDynamicColor('text', preset.text);
-                                updateDynamicColor('border', preset.bdr);
-                              }}
-                              className="px-2 py-1 rounded bg-white/5 border border-white/5 hover:bg-white/10 hover:border-white/10 transition-all text-[9px] font-mono text-zinc-400 cursor-pointer hover:text-white flex items-center gap-1"
-                            >
-                              <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: preset.bg }} />
-                              <span>{preset.name}</span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
                     </div>
                   </div>
 
                   {/* Category: Border Radius */}
                   <div className="space-y-1.5">
                     <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Corner Rounding</span>
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="grid grid-cols-2 gap-1.5">
                       {[
-                        { label: 'Sharp Corner', val: 'rounded-none' },
-                        { label: 'Small', val: 'rounded-md' },
-                        { label: 'Medium', val: 'rounded-xl' },
-                        { label: 'Super Round', val: 'rounded-3xl' },
-                        { label: 'Circular Pill', val: 'rounded-full' }
+                        { label: 'Sharp Corner', val: 'rounded-none', rounded: 'rounded-none' },
+                        { label: 'Soft Round', val: 'rounded-md', rounded: 'rounded-md' },
+                        { label: 'Modern Curve', val: 'rounded-xl', rounded: 'rounded-xl' },
+                        { label: 'Hyper Round', val: 'rounded-3xl', rounded: 'rounded-3xl' },
+                        { label: 'Circular Pill', val: 'rounded-full', rounded: 'rounded-full' }
                       ].map(item => {
-                        const isCurrent = selectedElement.classes.includes(item.val);
+                        const isCurrent = selectedElement.classes.includes(item.val) || (item.val === 'rounded-none' && !selectedElement.classes.includes('rounded-'));
                         return (
                           <button
                             key={item.label}
                             type="button"
                             onClick={() => applyStyleClass(['rounded-'], item.val)}
-                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all cursor-pointer border ${isCurrent ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-white/5 border-white/5 text-zinc-455 hover:bg-white/10 hover:text-white'}`}
+                            className={`p-2 rounded-lg text-[10px] font-medium transition-all cursor-pointer border flex items-center ${isCurrent ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-white/5 border-white/5 text-zinc-400 hover:bg-white/10 hover:text-white'}`}
                           >
-                            {item.label}
+                            <span className={`w-3.5 h-3.5 bg-white/10 mr-2 border border-white/20 inline-block shrink-0 ${item.rounded}`} />
+                            <span className="truncate">{item.label}</span>
                           </button>
                         );
                       })}
@@ -1300,21 +1545,48 @@ const App: React.FC = () => {
                   {/* Category: Alignment */}
                   <div className="space-y-1.5">
                     <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Text Alignment</span>
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="grid grid-cols-3 gap-1.5">
                       {[
-                        { label: 'Align Left', val: 'text-left' },
-                        { label: 'Align Center', val: 'text-center' },
-                        { label: 'Align Right', val: 'text-right' }
+                        { label: 'Left', val: 'text-left', icon: <AlignLeft className="w-3.5 h-3.5 shrink-0" /> },
+                        { label: 'Center', val: 'text-center', icon: <AlignCenter className="w-3.5 h-3.5 shrink-0" /> },
+                        { label: 'Right', val: 'text-right', icon: <AlignRight className="w-3.5 h-3.5 shrink-0" /> }
                       ].map(item => {
-                        const isCurrent = selectedElement.classes.includes(item.val);
+                        const isCurrent = selectedElement.classes.includes(item.val) || (item.val === 'text-left' && !selectedElement.classes.includes('text-center') && !selectedElement.classes.includes('text-right'));
                         return (
                           <button
                             key={item.label}
                             type="button"
                             onClick={() => applyStyleClass(['text-left', 'text-center', 'text-right'], item.val)}
-                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all cursor-pointer border ${isCurrent ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-white/5 border-white/5 text-zinc-455 hover:bg-white/10 hover:text-white'}`}
+                            className={`p-2 rounded-lg text-[10px] font-medium transition-all cursor-pointer border flex items-center justify-center gap-1.5 ${isCurrent ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-white/5 border-white/5 text-zinc-400 hover:bg-white/10 hover:text-white'}`}
                           >
-                            {item.label}
+                            {item.icon}
+                            <span>{item.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Category: Borders */}
+                  <div className="space-y-1.5">
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Border Outline</span>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      {[
+                        { label: 'No Outline', val: 'border-none', class: 'border-0 border-zinc-900 border-dashed' },
+                        { label: 'Glassy Card', val: 'border border-white/10', class: 'border border-white/10' },
+                        { label: 'Emerald Tint', val: 'border border-emerald-500/30', class: 'border border-emerald-500/30' },
+                        { label: 'Thick Steel', val: 'border-2 border-zinc-700', class: 'border-2 border-zinc-700' }
+                      ].map(item => {
+                        const isCurrent = selectedElement.classes.includes(item.val.split(' ')[0]) && item.val !== 'border-none';
+                        return (
+                          <button
+                            key={item.label}
+                            type="button"
+                            onClick={() => applyStyleClass(['border', 'border-'], item.val === 'border-none' ? '' : item.val)}
+                            className={`p-2 rounded-lg text-[10px] font-medium transition-all cursor-pointer border flex items-center gap-2 ${isCurrent || (item.val === 'border-none' && !selectedElement.classes.includes('border')) ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-white/5 border-white/5 text-zinc-400 hover:bg-white/10 hover:text-white'}`}
+                          >
+                            <span className={`w-4 h-3 rounded shrink-0 ${item.class}`} />
+                            <span className="truncate">{item.label}</span>
                           </button>
                         );
                       })}
@@ -1323,13 +1595,13 @@ const App: React.FC = () => {
 
                   {/* Category: Layout Mode */}
                   <div className="space-y-1.5">
-                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Flex Container Controls</span>
-                    <div className="flex flex-wrap gap-1.5">
+                    <span className="text-[10px] font-bold text-zinc-500 uppercase tracking-wider block">Container Flow</span>
+                    <div className="flex flex-col gap-1.5">
                       {[
-                        { label: 'Block (Default)', val: 'block' },
-                        { label: 'Flex Column', val: 'flex flex-col gap-4' },
-                        { label: 'Flex Row (Align Center)', val: 'flex flex-row items-center gap-2' },
-                        { label: 'Centered Flex', val: 'flex items-center justify-center' }
+                        { label: 'Regular Block (Responsive)', val: 'block', desc: 'Flows naturally in document stack' },
+                        { label: 'Grid Stack (Flex Column)', val: 'flex flex-col gap-4', desc: 'Vertical alignment, 16px gap spacing' },
+                        { label: 'Horizontal Row (Flex Row)', val: 'flex flex-row items-center gap-2', desc: 'Side-by-side spacing with auto center' },
+                        { label: 'Symmetry Center (Centered)', val: 'flex items-center justify-center', desc: 'Horizontal and Vertical visual center' }
                       ].map(item => {
                         const isCurrent = selectedElement.classes.includes(item.val.split(' ')[0]);
                         return (
@@ -1337,9 +1609,10 @@ const App: React.FC = () => {
                             key={item.label}
                             type="button"
                             onClick={() => applyStyleClass(['flex', 'flex-col', 'flex-row', 'items-center', 'justify-center', 'block'], item.val)}
-                            className={`px-2.5 py-1.5 rounded-lg text-[11px] font-medium transition-all cursor-pointer border ${isCurrent ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-white/5 border-white/5 text-zinc-455 hover:bg-white/10 hover:text-white'}`}
+                            className={`p-2.5 rounded-lg text-[10px] transition-all cursor-pointer border text-left flex flex-col gap-0.5 ${isCurrent ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-400' : 'bg-white/5 border-white/5 text-zinc-400 hover:bg-white/10 hover:text-white'}`}
                           >
-                            {item.label}
+                            <span className="font-bold">{item.label}</span>
+                            <span className="text-[9px] text-zinc-500">{item.desc}</span>
                           </button>
                         );
                       })}
@@ -1374,7 +1647,7 @@ const App: React.FC = () => {
             <ChevronLeft className="w-5 h-5" /> Back
           </button>
           <div className="flex items-center gap-3">
-            <img src="/logo.jpeg" alt="Logo" className="w-8 h-8 rounded-lg shadow-lg" />
+            <img src="/tdai_logo.jpeg" alt="Logo" className="w-8 h-8 rounded-lg shadow-lg" />
             <span className="font-bold text-xl tracking-tighter">Your Workspace</span>
           </div>
         </div>
@@ -1413,58 +1686,127 @@ const App: React.FC = () => {
           </div>
         </div>
 
-        {/* Project History */}
+        {/* Workspace Hub Tabs */}
         <div>
-          <div className="flex items-center gap-3 mb-8">
-            <History className="w-6 h-6 text-emerald-400" />
-            <h3 className="text-2xl font-semibold">Your Projects</h3>
+          <div className="flex border-b border-white/10 gap-8 mb-8">
+            <button 
+              onClick={() => setProfileTab('projects')}
+              className={`pb-4 px-1.5 text-lg font-bold transition-all relative ${profileTab === 'projects' ? 'text-white font-black' : 'text-zinc-500 hover:text-white'}`}
+            >
+              Original Projects ({userProjects.length})
+              {profileTab === 'projects' && (
+                <motion.div layoutId="profile-tab-line" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400" />
+              )}
+            </button>
+            <button 
+              onClick={() => {
+                fetchSavedDesigns();
+                setProfileTab('saves');
+              }}
+              className={`pb-4 px-1.5 text-lg font-bold transition-all relative ${profileTab === 'saves' ? 'text-white font-black' : 'text-zinc-500 hover:text-white'}`}
+            >
+              Saved Edited Designs ({userSavedDesigns.length})
+              {profileTab === 'saves' && (
+                <motion.div layoutId="profile-tab-line" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400" />
+              )}
+            </button>
           </div>
 
-          {isLoadingProjects ? (
-            <div className="flex justify-center py-12">
-              <Loader2 className="w-8 h-8 animate-spin text-zinc-500" />
-            </div>
-          ) : userProjects.length === 0 ? (
-            <div className="text-center py-16 bg-white/5 border border-white/10 rounded-3xl">
-              <p className="text-zinc-400 text-lg">You haven't generated any projects yet.</p>
-              <button 
-                onClick={() => setView(AppView.LANDING)}
-                className="mt-6 bg-white text-black px-6 py-3 rounded-full font-medium hover:bg-zinc-200 transition-colors"
-              >
-                Create Your First Project
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {userProjects.map((project) => (
-                  <div 
-                    key={project.id} 
-                    className="bg-white/5 border border-white/10 rounded-2xl p-6 hover:bg-white/10 transition-colors cursor-pointer group flex flex-col h-full"
-                    onClick={() => {
-                      setVariants(project.variants);
-                      setCurrentVariantIndex(0);
-                      setCurrentProjectUsage(project.usage || null);
-                      setCurrentProjectCost(project.cost || 0);
-                      setView(AppView.PREVIEW);
-                    }}
-                  >
-                    <div className="flex-1">
-                      <h4 className="font-medium text-lg mb-2 line-clamp-2 group-hover:text-emerald-400 transition-colors">
-                        {project.prompt}
-                      </h4>
-                      <p className="text-sm text-zinc-500 mb-4">
-                        {new Date(project.createdAt).toLocaleDateString()}
-                      </p>
-                    </div>
-                    
-                    <div className="mt-auto pt-4 border-t border-white/5 flex items-center justify-between">
-                      <div className="flex items-center gap-2 text-[10px] font-mono text-zinc-500">
-                        <span className="bg-black/50 px-2 py-1 rounded-md">{project.variants.length} Variants</span>
+          {profileTab === 'projects' ? (
+            isLoadingProjects ? (
+              <div className="flex justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-zinc-500" />
+              </div>
+            ) : userProjects.length === 0 ? (
+              <div className="text-center py-16 bg-white/5 border border-white/10 rounded-3xl">
+                <p className="text-zinc-400 text-lg">You haven't generated any projects yet.</p>
+                <button 
+                  onClick={() => setView(AppView.LANDING)}
+                  className="mt-6 bg-white text-black px-6 py-3 rounded-full font-medium hover:bg-zinc-200 transition-colors"
+                >
+                  Create Your First Project
+                </button>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {userProjects.map((project) => (
+                    <div 
+                      key={project.id} 
+                      className="bg-white/5 border border-white/10 rounded-2xl p-6 hover:bg-white/10 transition-colors cursor-pointer group flex flex-col h-full"
+                      onClick={() => {
+                        setVariants(project.variants);
+                        setCurrentVariantIndex(0);
+                        setCurrentProjectUsage(project.usage || null);
+                        setCurrentProjectCost(project.cost || 0);
+                        setView(AppView.PREVIEW);
+                      }}
+                    >
+                      <div className="flex-1">
+                        <h4 className="font-medium text-lg mb-2 line-clamp-2 group-hover:text-emerald-400 transition-colors">
+                          {project.prompt}
+                        </h4>
+                        <p className="text-sm text-zinc-500 mb-4">
+                          {new Date(project.createdAt).toLocaleDateString()}
+                        </p>
+                      </div>
+                      
+                      <div className="mt-auto pt-4 border-t border-white/5 flex items-center justify-between">
+                        <div className="flex items-center gap-2 text-[10px] font-mono text-zinc-500">
+                          <span className="bg-black/50 px-2 py-1 rounded-md">{project.variants.length} Variants</span>
+                        </div>
                       </div>
                     </div>
-                  </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )
+          ) : (
+            isLoadingSavedDesigns ? (
+              <div className="flex justify-center py-12">
+                <Loader2 className="w-8 h-8 animate-spin text-zinc-500" />
+              </div>
+            ) : userSavedDesigns.length === 0 ? (
+              <div className="text-center py-16 bg-white/5 border border-white/10 rounded-3xl">
+                <p className="text-zinc-400 text-lg">You haven't saved any customized variants to history yet.</p>
+                <p className="text-zinc-500 text-sm mt-2 max-w-sm mx-auto">
+                  Modify any variant layout using the interactive side chatbot panel, then click "Save Design" to persist your visual drafts.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                {userSavedDesigns.map((design) => (
+                    <div 
+                      key={design.id} 
+                      className="bg-white/5 border border-white/10 rounded-2xl p-6 hover:bg-white/10 transition-colors cursor-pointer group flex flex-col h-full animate-fadeIn"
+                      onClick={() => {
+                        setBuilderHtml(design.html);
+                        setIsManualEditing(false);
+                        setChatMessages([
+                          { id: 'welcome', role: 'ai', content: `Restored saved design: "${design.name}".` }
+                        ]);
+                        setView(AppView.BUILDER);
+                      }}
+                    >
+                      <div className="flex-1">
+                        <h4 className="font-bold text-lg mb-2 line-clamp-2 text-zinc-200 group-hover:text-emerald-400 transition-colors">
+                          {design.name}
+                        </h4>
+                        <p className="text-xs text-zinc-400 mb-2 font-mono italic">
+                          Parent prompt: "{design.parentPrompt}"
+                        </p>
+                        <p className="text-xs text-zinc-500 mb-4 font-mono">
+                          Saved: {new Date(design.createdAt).toLocaleString()}
+                        </p>
+                      </div>
+                      
+                      <div className="mt-auto pt-4 border-t border-white/5 flex items-center justify-between">
+                        <span className="text-[10px] text-emerald-400 font-bold bg-emerald-500/10 px-2.5 py-1 rounded-full uppercase tracking-wider">
+                          Load Edited Design
+                        </span>
+                      </div>
+                    </div>
+                ))}
+              </div>
+            )
           )}
         </div>
       </main>
@@ -1488,20 +1830,89 @@ const App: React.FC = () => {
     const totalPrompt = adminProjects.reduce((sum, p) => sum + (p.usage?.promptTokenCount || 0), 0);
     const totalCandidates = adminProjects.reduce((sum, p) => sum + (p.usage?.candidatesTokenCount || 0), 0);
 
-    // Group stats by user id
-    const userStats: Record<string, { projectsCount: number; cost: number; promptTokens: number; candidatesTokens: number; totalTokens: number }> = {};
-    adminUsers.forEach(u => {
-      userStats[u.uid] = { projectsCount: 0, cost: 0, promptTokens: 0, candidatesTokens: 0, totalTokens: 0 };
+    const chatbotCost = adminChatbotUsage.reduce((sum, c) => sum + (c.cost || 0), 0);
+    const chatbotTokens = adminChatbotUsage.reduce((sum, c) => sum + (c.usage?.totalTokenCount || 0), 0);
+    const chatbotPrompt = adminChatbotUsage.reduce((sum, c) => sum + (c.usage?.promptTokenCount || 0), 0);
+    const chatbotCandidates = adminChatbotUsage.reduce((sum, c) => sum + (c.usage?.candidatesTokenCount || 0), 0);
+
+    const grandTotalCost = totalCost + chatbotCost;
+    const grandTotalTokens = totalTokens + chatbotTokens;
+    const grandTotalPrompt = totalPrompt + chatbotPrompt;
+    const grandTotalCandidates = totalCandidates + chatbotCandidates;
+
+    // Prepare daily time-series data for the charts
+    const dailyMap: Record<string, { date: string; projectsCost: number; chatbotCost: number; projectsTokens: number; chatbotTokens: number; totalCost: number }> = {};
+    
+    adminProjects.forEach(p => {
+      if (!p.createdAt) return;
+      const d = new Date(p.createdAt);
+      if (isNaN(d.getTime())) return;
+      const key = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      if (!dailyMap[key]) {
+        dailyMap[key] = { date: key, projectsCost: 0, chatbotCost: 0, projectsTokens: 0, chatbotTokens: 0, totalCost: 0 };
+      }
+      dailyMap[key].projectsCost += p.cost || 0;
+      dailyMap[key].projectsTokens += p.usage?.totalTokenCount || 0;
+      dailyMap[key].totalCost += p.cost || 0;
     });
+
+    adminChatbotUsage.forEach(c => {
+      if (!c.createdAt) return;
+      const d = new Date(c.createdAt);
+      if (isNaN(d.getTime())) return;
+      const key = d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+      if (!dailyMap[key]) {
+        dailyMap[key] = { date: key, projectsCost: 0, chatbotCost: 0, projectsTokens: 0, chatbotTokens: 0, totalCost: 0 };
+      }
+      dailyMap[key].chatbotCost += c.cost || 0;
+      dailyMap[key].chatbotTokens += c.usage?.totalTokenCount || 0;
+      dailyMap[key].totalCost += c.cost || 0;
+    });
+
+    const dailyChartData = Object.values(dailyMap).sort((a, b) => {
+      const projA = adminProjects.find(p => p.createdAt && new Date(p.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) === a.date);
+      const chatA = adminChatbotUsage.find(c => c.createdAt && new Date(c.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) === a.date);
+      const valA = new Date(projA?.createdAt || chatA?.createdAt || Date.now()).getTime();
+
+      const projB = adminProjects.find(p => p.createdAt && new Date(p.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) === b.date);
+      const chatB = adminChatbotUsage.find(c => c.createdAt && new Date(c.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) === b.date);
+      const valB = new Date(projB?.createdAt || chatB?.createdAt || Date.now()).getTime();
+
+      return valA - valB;
+    });
+
+    // Group stats by user id
+    const userStats: Record<string, { 
+      projectsCount: number; 
+      cost: number; 
+      promptTokens: number; 
+      candidatesTokens: number; 
+      totalTokens: number;
+      chatCost: number;
+      chatTokens: number;
+    }> = {};
+
+    adminUsers.forEach(u => {
+      userStats[u.uid] = { projectsCount: 0, cost: 0, promptTokens: 0, candidatesTokens: 0, totalTokens: 0, chatCost: 0, chatTokens: 0 };
+    });
+
     adminProjects.forEach(p => {
       if (!userStats[p.userId]) {
-        userStats[p.userId] = { projectsCount: 0, cost: 0, promptTokens: 0, candidatesTokens: 0, totalTokens: 0 };
+        userStats[p.userId] = { projectsCount: 0, cost: 0, promptTokens: 0, candidatesTokens: 0, totalTokens: 0, chatCost: 0, chatTokens: 0 };
       }
       userStats[p.userId].projectsCount += 1;
       userStats[p.userId].cost += (p.cost || 0);
       userStats[p.userId].promptTokens += (p.usage?.promptTokenCount || 0);
       userStats[p.userId].candidatesTokens += (p.usage?.candidatesTokenCount || 0);
       userStats[p.userId].totalTokens += (p.usage?.totalTokenCount || 0);
+    });
+
+    adminChatbotUsage.forEach(c => {
+      if (!userStats[c.userId]) {
+        userStats[c.userId] = { projectsCount: 0, cost: 0, promptTokens: 0, candidatesTokens: 0, totalTokens: 0, chatCost: 0, chatTokens: 0 };
+      }
+      userStats[c.userId].chatCost += (c.cost || 0);
+      userStats[c.userId].chatTokens += (c.usage?.totalTokenCount || 0);
     });
 
     // Detailed projects for selected user
@@ -1526,7 +1937,7 @@ const App: React.FC = () => {
               <ChevronLeft className="w-5 h-5" /> Back to App
             </button>
             <div className="flex items-center gap-3">
-              <img src="/logo.jpeg" alt="Logo" className="w-8 h-8 rounded-lg shadow-lg" />
+              <img src="/tdai_logo.jpeg" alt="Logo" className="w-8 h-8 rounded-lg shadow-lg" />
               <div className="flex flex-col">
                 <span className="font-bold text-lg tracking-tighter leading-none">Console</span>
                 <span className="text-zinc-500 text-[10px] uppercase font-bold tracking-widest leading-none mt-1">Admin Dashboard</span>
@@ -1565,17 +1976,19 @@ const App: React.FC = () => {
             <>
               {/* Telemetry Bento Grid */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-                
-                {/* 1. Cost */}
+                     {/* 1. Cost */}
                 <div className="bg-zinc-950/40 backdrop-blur-xl border border-white/5 rounded-3xl p-6 relative overflow-hidden group">
                   <div className="absolute top-0 right-0 p-4 opacity-5 group-hover:opacity-10 transition-opacity">
                     <Coins className="w-16 h-16 text-emerald-400" />
                   </div>
                   <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono block mb-2">Total Api Cost</span>
                   <div className="text-3xl md:text-4xl font-black text-emerald-400 tracking-tight font-mono leading-none">
-                    ${totalCost.toFixed(3)}
+                    ${grandTotalCost.toFixed(3)}
                   </div>
-                  <span className="text-[10px] text-zinc-500 font-mono block mt-3">Calculated from model prices</span>
+                  <div className="text-[10px] text-zinc-500 font-mono mt-3 flex justify-between">
+                    <span>Projs: ${totalCost.toFixed(3)}</span>
+                    <span>Chat: ${chatbotCost.toFixed(3)}</span>
+                  </div>
                 </div>
 
                 {/* 2. Registered & Active Users */}
@@ -1611,14 +2024,125 @@ const App: React.FC = () => {
                   </div>
                   <span className="text-[10px] text-zinc-500 uppercase tracking-widest font-mono block mb-2">Token Usage Balance</span>
                   <div className="text-3xl md:text-4xl font-black text-yellow-500 tracking-tight leading-none font-mono">
-                    {(totalTokens / 1000).toFixed(0)}k
+                    {(grandTotalTokens / 1000).toFixed(0)}k
                   </div>
-                  <div className="text-[10px] text-zinc-500 font-mono mt-3 flex justify-between">
-                    <span>In: {(totalPrompt / 1000).toFixed(0)}k</span>
-                    <span>Out: {(totalCandidates / 1000).toFixed(0)}k</span>
+                  <div className="text-[10px] text-zinc-500 font-mono mt-3 flex flex-col gap-0.5">
+                    <div className="flex justify-between">
+                      <span>Projs: {(totalTokens / 1000).toFixed(0)}k</span>
+                      <span>Chat: {(chatbotTokens / 1000).toFixed(0)}k</span>
+                    </div>
                   </div>
                 </div>
 
+              </div>
+
+              {/* Telemetry Visual Graphs (New) */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* 1. Daily Costs Graph */}
+                <div className="bg-zinc-950/40 backdrop-blur-xl border border-white/5 rounded-3xl p-6 flex flex-col h-[380px]">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <TrendingUp className="w-4 h-4 text-emerald-400" />
+                      <h4 className="text-sm font-bold text-zinc-200">Daily API Costs (USD)</h4>
+                    </div>
+                    <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Model Price Weighted</span>
+                  </div>
+                  
+                  {dailyChartData.length === 0 ? (
+                    <div className="flex-1 flex items-center justify-center text-zinc-650 text-xs font-mono">
+                      No telemetry cost logs gathered yet.
+                    </div>
+                  ) : (
+                    <div className="flex-1 w-full min-h-0 text-[10px] font-mono">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <AreaChart data={dailyChartData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="colorProjects" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#10b981" stopOpacity={0.2}/>
+                              <stop offset="95%" stopColor="#10b981" stopOpacity={0}/>
+                            </linearGradient>
+                            <linearGradient id="colorChat" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="#8b5cf6" stopOpacity={0.2}/>
+                              <stop offset="95%" stopColor="#8b5cf6" stopOpacity={0}/>
+                            </linearGradient>
+                          </defs>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#27272a" strokeOpacity={0.1} vertical={false} />
+                          <XAxis dataKey="date" stroke="#71717a" tickLine={false} />
+                          <YAxis stroke="#71717a" tickLine={false} tickFormatter={(val) => `$${val.toFixed(2)}`} />
+                          <Tooltip 
+                            content={({ active, payload, label }) => {
+                              if (active && payload && payload.length) {
+                                return (
+                                  <div className="bg-zinc-950 border border-white/10 p-3 rounded-xl shadow-2xl font-mono text-[10px] text-zinc-300">
+                                    <p className="font-bold text-white mb-1">{label}</p>
+                                    {payload.map((entry: any, i: number) => (
+                                      <div key={i} className="flex justify-between gap-4 py-0.5">
+                                        <span style={{ color: entry.stroke || entry.fill }}>{entry.name}:</span>
+                                        <span className="font-bold text-white">${entry.value.toFixed(4)}</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                );
+                              }
+                              return null;
+                            }}
+                          />
+                          <Area name="Project Gen" type="monotone" dataKey="projectsCost" stroke="#10b981" fillOpacity={1} fill="url(#colorProjects)" strokeWidth={2} />
+                          <Area name="Chat Adjust" type="monotone" dataKey="chatbotCost" stroke="#8b5cf6" fillOpacity={1} fill="url(#colorChat)" strokeWidth={2} />
+                          <Legend verticalAlign="top" height={36} iconType="circle" iconSize={8} />
+                        </AreaChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Daily Token Load Graph */}
+                <div className="bg-zinc-950/40 backdrop-blur-xl border border-white/5 rounded-3xl p-6 flex flex-col h-[380px]">
+                  <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                      <Activity className="w-4 h-4 text-yellow-500" />
+                      <h4 className="text-sm font-bold text-zinc-200">Daily Token Load</h4>
+                    </div>
+                    <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Model Token Consumption</span>
+                  </div>
+                  
+                  {dailyChartData.length === 0 ? (
+                    <div className="flex-1 flex items-center justify-center text-zinc-650 text-xs font-mono">
+                      No token telemetry data gathered yet.
+                    </div>
+                  ) : (
+                    <div className="flex-1 w-full min-h-0 text-[10px] font-mono">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={dailyChartData} margin={{ top: 10, right: 10, left: -10, bottom: 0 }}>
+                          <CartesianGrid strokeDasharray="3 3" stroke="#27272a" strokeOpacity={0.1} vertical={false} />
+                          <XAxis dataKey="date" stroke="#71717a" tickLine={false} />
+                          <YAxis stroke="#71717a" tickLine={false} tickFormatter={(val) => `${(val / 1000).toFixed(0)}k`} />
+                          <Tooltip 
+                            content={({ active, payload, label }) => {
+                              if (active && payload && payload.length) {
+                                return (
+                                  <div className="bg-zinc-950 border border-white/10 p-3 rounded-xl shadow-2xl font-mono text-[10px] text-zinc-300">
+                                    <p className="font-bold text-white mb-1">{label}</p>
+                                    {payload.map((entry: any, i: number) => (
+                                      <div key={i} className="flex justify-between gap-4 py-0.5">
+                                        <span style={{ color: entry.fill }}>{entry.name}:</span>
+                                        <span className="font-bold text-white">{(entry.value / 1000).toFixed(1)}k tokens</span>
+                                      </div>
+                                    ))}
+                                  </div>
+                                );
+                              }
+                              return null;
+                            }}
+                          />
+                          <Bar name="Project Tokens" dataKey="projectsTokens" fill="#10b981" radius={[4, 4, 0, 0]} />
+                          <Bar name="Chatbot Tokens" dataKey="chatbotTokens" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                          <Legend verticalAlign="top" height={36} iconType="circle" iconSize={8} />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  )}
+                </div>
               </div>
 
               {/* User management and Detail Panel */}
@@ -1649,7 +2173,7 @@ const App: React.FC = () => {
                       </thead>
                       <tbody className="divide-y divide-white/5">
                         {adminUsers.map(userItem => {
-                          const stats = userStats[userItem.uid] || { projectsCount: 0, cost: 0, totalTokens: 0 };
+                          const stats = userStats[userItem.uid] || { projectsCount: 0, cost: 0, totalTokens: 0, chatCost: 0, chatTokens: 0 };
                           const isActivePro = userItem.subscription?.status === 'active' || userItem.email === 'thedesignai3@gmail.com';
                           const isCurrentlySelected = selectedAdminUser?.uid === userItem.uid;
 
@@ -1695,16 +2219,19 @@ const App: React.FC = () => {
                                 </div>
                               </td>
 
-                              <td className="py-4 pr-4 text-right font-mono font-bold text-zinc-300">
-                                {stats.projectsCount}
+                              <td className="py-4 pr-4">
+                                <div className="flex flex-col text-right font-mono text-zinc-300">
+                                  <span className="font-bold">{stats.projectsCount} Projs</span>
+                                  <span className="text-zinc-500 text-[11px]">{(stats.chatTokens / 1000).toFixed(1)}k chat tkns</span>
+                                </div>
                               </td>
 
                               <td className="py-4 pr-4 text-right">
                                 <span className="font-mono text-emerald-400 block font-bold text-sm">
-                                  ${stats.cost.toFixed(4)}
+                                  ${(stats.cost + stats.chatCost).toFixed(4)}
                                 </span>
                                 <span className="text-[10px] text-zinc-500 block font-mono">
-                                  {(stats.totalTokens / 1000).toFixed(0)}k tkns
+                                  {((stats.totalTokens + stats.chatTokens) / 1000).toFixed(1)}k total
                                 </span>
                               </td>
 
@@ -1754,88 +2281,153 @@ const App: React.FC = () => {
                     {/* Quick user totals bento */}
                     <div className="grid grid-cols-3 gap-2 bg-black/40 border border-white/5 rounded-2xl p-4">
                       <div>
-                        <span className="text-[9px] text-zinc-505 uppercase font-mono block">Total Projects</span>
-                        <span className="text-sm font-bold font-mono text-zinc-200">{selectedUserProjects.length}</span>
-                      </div>
-                      <div>
-                        <span className="text-[9px] text-zinc-505 uppercase font-mono block font-bold">Sum Incurred</span>
-                        <span className="text-sm font-black font-mono text-emerald-400">
-                          ${(userStats[selectedAdminUser.uid]?.cost || 0).toFixed(4)}
+                        <span className="text-[9px] text-zinc-500 uppercase font-mono block">Projs / Chat</span>
+                        <span className="text-sm font-bold font-mono text-zinc-200">
+                          {selectedUserProjects.length} / {adminChatbotUsage.filter(c => c.userId === selectedAdminUser.uid).length}
                         </span>
                       </div>
                       <div>
-                        <span className="text-[9px] text-zinc-505 uppercase font-mono block">Total Tokens</span>
+                        <span className="text-[9px] text-zinc-500 uppercase font-mono block font-bold">Total Cost</span>
+                        <span className="text-sm font-black font-mono text-emerald-400">
+                          ${((userStats[selectedAdminUser.uid]?.cost || 0) + (userStats[selectedAdminUser.uid]?.chatCost || 0)).toFixed(4)}
+                        </span>
+                      </div>
+                      <div>
+                        <span className="text-[9px] text-zinc-500 uppercase font-mono block">Total Tokens</span>
                         <span className="text-sm font-bold font-mono text-zinc-200">
-                          {((userStats[selectedAdminUser.uid]?.totalTokens || 0) / 1000).toFixed(0)}k
+                          {(((userStats[selectedAdminUser.uid]?.totalTokens || 0) + (userStats[selectedAdminUser.uid]?.chatTokens || 0)) / 1000).toFixed(1)}k
                         </span>
                       </div>
                     </div>
 
                     {/* Detailed Prompt entries list */}
                     <div className="flex flex-col gap-4">
-                      <h4 className="text-xs font-bold text-zinc-400 uppercase tracking-wider font-mono">Prompt & API Run Log History</h4>
+                      {/* Selected user logs sub-tabs */}
+                      <div className="flex border-b border-white/5 gap-4">
+                        <button 
+                          onClick={() => setAdminLogTab('projects')}
+                          className={`pb-2 px-1 text-xs font-bold transition-all relative ${adminLogTab === 'projects' ? 'text-white' : 'text-zinc-500 hover:text-white'}`}
+                        >
+                          Project Runs ({selectedUserProjects.length})
+                          {adminLogTab === 'projects' && (
+                            <motion.div layoutId="admin-log-tab-line" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400" />
+                          )}
+                        </button>
+                        <button 
+                          onClick={() => setAdminLogTab('chatbot')}
+                          className={`pb-2 px-1 text-xs font-bold transition-all relative ${adminLogTab === 'chatbot' ? 'text-white' : 'text-zinc-500 hover:text-white'}`}
+                        >
+                          Chatbot Edits ({adminChatbotUsage.filter(c => c.userId === selectedAdminUser.uid).length})
+                          {adminLogTab === 'chatbot' && (
+                            <motion.div layoutId="admin-log-tab-line" className="absolute bottom-0 left-0 right-0 h-0.5 bg-emerald-400" />
+                          )}
+                        </button>
+                      </div>
                       
-                      {selectedUserProjects.length === 0 ? (
-                        <div className="text-center py-10 bg-black/20 rounded-2xl border border-white/5 text-zinc-505 text-sm">
-                          No query logs registered for this user in workspace records.
-                        </div>
-                      ) : (
-                        <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
-                          {selectedUserProjects.map(proj => {
-                            const dateStr = new Date(proj.createdAt).toLocaleString();
-                            const variantsCount = proj.variants?.length || 0;
-                            const promptTitle = proj.prompt;
-                            const costVal = proj.cost || 0;
-                            const tPrompt = proj.usage?.promptTokenCount || 0;
-                            const tCandidates = proj.usage?.candidatesTokenCount || 0;
+                      {adminLogTab === 'projects' ? (
+                        selectedUserProjects.length === 0 ? (
+                          <div className="text-center py-10 bg-black/20 rounded-2xl border border-white/5 text-zinc-500 text-sm">
+                            No query logs registered for this user in workspace records.
+                          </div>
+                        ) : (
+                          <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                            {selectedUserProjects.map(proj => {
+                              const dateStr = new Date(proj.createdAt).toLocaleString();
+                              const variantsCount = proj.variants?.length || 0;
+                              const promptTitle = proj.prompt;
+                              const costVal = proj.cost || 0;
+                              const tPrompt = proj.usage?.promptTokenCount || 0;
+                              const tCandidates = proj.usage?.candidatesTokenCount || 0;
 
-                            return (
-                              <div key={proj.id} className="bg-black/30 border border-white/5 rounded-xl p-4 hover:border-white/10 transition-colors flex flex-col gap-3 relative group">
-                                <div className="flex justify-between items-start gap-4">
-                                  <div className="flex-1">
-                                    <span className="text-[9px] text-zinc-550 font-mono block mb-1">Prompt Query Run: {dateStr}</span>
-                                    <p className="text-xs text-white font-medium line-clamp-2 md:leading-relaxed" title={promptTitle}>
-                                      "{promptTitle}"
+                              return (
+                                <div key={proj.id} className="bg-black/30 border border-white/5 rounded-xl p-4 hover:border-white/10 transition-colors flex flex-col gap-3 relative group">
+                                  <div className="flex justify-between items-start gap-4">
+                                    <div className="flex-1">
+                                      <span className="text-[9px] text-zinc-500 font-mono block mb-1">Prompt Query Run: {dateStr}</span>
+                                      <p className="text-xs text-white font-medium line-clamp-2 md:leading-relaxed" title={promptTitle}>
+                                        "{promptTitle}"
+                                      </p>
+                                    </div>
+
+                                    <button
+                                      onClick={() => {
+                                        setVariants(proj.variants);
+                                        setCurrentVariantIndex(0);
+                                        setCurrentProjectUsage(proj.usage || null);
+                                        setCurrentProjectCost(proj.cost || 0);
+                                        setView(AppView.PREVIEW);
+                                      }}
+                                      className="shrink-0 flex items-center gap-1 bg-white/5 hover:bg-emerald-500 hover:text-black hover:border-emerald-600 border border-white/10 text-zinc-300 px-2 py-1 rounded text-[10px] font-bold transition-all"
+                                      title="Examine live rendered artifact variants"
+                                    >
+                                      <span>View UI</span>
+                                      <ArrowUpRight className="w-3 h-3" />
+                                    </button>
+                                  </div>
+
+                                  <div className="grid grid-cols-3 gap-2 pt-2 border-t border-white/5 text-[10px] font-mono text-zinc-500">
+                                    <div>
+                                      <span className="block text-[8px] uppercase text-zinc-555 font-bold">Cost</span>
+                                      <span className="text-emerald-400 font-bold">${costVal.toFixed(4)}</span>
+                                    </div>
+                                    <div>
+                                      <span className="block text-[8px] uppercase text-zinc-555 font-bold">Tokens</span>
+                                      <span className="text-zinc-300">{tPrompt + tCandidates} total</span>
+                                    </div>
+                                    <div>
+                                      <span className="block text-[8px] uppercase text-zinc-555 font-bold font-bold">Variants</span>
+                                      <span className="text-zinc-300">{variantsCount} synthesized</span>
+                                    </div>
+                                  </div>
+                                  <div className="text-[9px] text-zinc-650 font-mono text-right mt-1">
+                                    In: {tPrompt} tkns / Out: {tCandidates} tkns
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        )
+                      ) : (
+                        adminChatbotUsage.filter(c => c.userId === selectedAdminUser.uid).length === 0 ? (
+                          <div className="text-center py-10 bg-black/20 rounded-2xl border border-white/5 text-zinc-500 text-sm">
+                            No chatbot query records found in workspace logs.
+                          </div>
+                        ) : (
+                          <div className="space-y-3 max-h-[420px] overflow-y-auto pr-1">
+                            {adminChatbotUsage.filter(c => c.userId === selectedAdminUser.uid).map(chat => {
+                              const dateStr = new Date(chat.createdAt).toLocaleString();
+                              const chatPrompt = chat.prompt;
+                              const costVal = chat.cost || 0;
+                              const tPrompt = chat.usage?.promptTokenCount || 0;
+                              const tCandidates = chat.usage?.candidatesTokenCount || 0;
+
+                              return (
+                                <div key={chat.id} className="bg-black/30 border border-white/5 rounded-xl p-4 hover:border-white/10 transition-colors flex flex-col gap-3 relative">
+                                  <div>
+                                    <span className="text-[9px] text-zinc-500 font-mono block mb-1 font-bold">Chatbot Request: {dateStr}</span>
+                                    <p className="text-xs text-white font-medium italic break-words leading-relaxed animate-fadeIn" title={chatPrompt}>
+                                      "{chatPrompt}"
                                     </p>
                                   </div>
 
-                                  <button
-                                    onClick={() => {
-                                      setVariants(proj.variants);
-                                      setCurrentVariantIndex(0);
-                                      setCurrentProjectUsage(proj.usage || null);
-                                      setCurrentProjectCost(proj.cost || 0);
-                                      setView(AppView.PREVIEW);
-                                    }}
-                                    className="shrink-0 flex items-center gap-1 bg-white/5 hover:bg-emerald-500 hover:text-black hover:border-emerald-600 border border-white/10 text-zinc-300 px-2 py-1 rounded text-[10px] font-bold transition-all"
-                                    title="Examine live rendered artifact variants"
-                                  >
-                                    <span>View UI</span>
-                                    <ArrowUpRight className="w-3 h-3" />
-                                  </button>
-                                </div>
-
-                                <div className="grid grid-cols-3 gap-2 pt-2 border-t border-white/5 text-[10px] font-mono text-zinc-500">
-                                  <div>
-                                    <span className="block text-[8px] uppercase text-zinc-500">Cost</span>
-                                    <span className="text-emerald-400 font-bold">${costVal.toFixed(4)}</span>
+                                  <div className="grid grid-cols-2 gap-2 pt-2 border-t border-white/5 text-[10px] font-mono text-zinc-500">
+                                    <div>
+                                      <span className="block text-[8px] uppercase text-zinc-555 font-bold">Chatbot Cost</span>
+                                      <span className="text-emerald-400 font-bold">${costVal.toFixed(4)}</span>
+                                    </div>
+                                    <div>
+                                      <span className="block text-[8px] uppercase text-zinc-555 font-bold">Total Tokens</span>
+                                      <span className="text-zinc-300">{tPrompt + tCandidates}</span>
+                                    </div>
                                   </div>
-                                  <div>
-                                    <span className="block text-[8px] uppercase text-zinc-500">Tokens</span>
-                                    <span className="text-zinc-300">{tPrompt + tCandidates} total</span>
-                                  </div>
-                                  <div>
-                                    <span className="block text-[8px] uppercase text-zinc-500">Variants</span>
-                                    <span className="text-zinc-300">{variantsCount} synthesized</span>
+                                  <div className="text-[9px] text-zinc-650 font-mono text-right mt-1">
+                                    In: {tPrompt} tkns / Out: {tCandidates} tkns
                                   </div>
                                 </div>
-                                <div className="text-[9px] text-zinc-600 font-mono text-right mt-1">
-                                  In: {tPrompt} tkns / Out: {tCandidates} tkns
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
+                              );
+                            })}
+                          </div>
+                        )
                       )}
                     </div>
 
@@ -1876,20 +2468,13 @@ const App: React.FC = () => {
             }}
           />
         ) : null}
-
-        {apiKeyErrorDetails ? (
-          <ApiKeyErrorModal 
-            details={apiKeyErrorDetails}
-            onClose={() => setApiKeyErrorDetails(null)}
-          />
-        ) : null}
       </AnimatePresence>
 
       {/* Global Branding Credit */}
-      <div className="fixed bottom-6 right-6 z-50 flex items-center gap-2 opacity-40 hover:opacity-100 transition-opacity pointer-events-none sm:pointer-events-auto">
+      <div className="fixed bottom-6 left-6 z-50 flex items-center gap-2 opacity-40 hover:opacity-100 transition-opacity pointer-events-none sm:pointer-events-auto">
         <span className="text-[10px] uppercase tracking-widest font-medium text-zinc-500">TheDesignAI</span>
         <div className="flex items-center gap-2 px-3 py-1.5 rounded-full bg-white/5 border border-white/10 backdrop-blur-md">
-          <img src="/logo.jpeg" alt="Logo" className="w-5 h-5 rounded-full" />
+          <img src="/tdai_logo.jpeg" alt="Logo" className="w-5 h-5 rounded-full" />
           <span className="text-[10px] font-bold tracking-tighter text-zinc-400">by Anqair</span>
         </div>
       </div>

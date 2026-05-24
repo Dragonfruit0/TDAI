@@ -60,3 +60,13 @@ export interface UserProfile {
     createdAt?: string;
   };
 }
+
+export interface SavedDesign {
+  id: string;
+  userId: string;
+  name: string;
+  html: string;
+  parentPrompt: string;
+  createdAt: string;
+}
+
