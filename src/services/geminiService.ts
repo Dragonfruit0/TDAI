@@ -6,14 +6,59 @@ export interface GenerationResult<T> {
   usage: UsageMetadata;
 }
 
-export async function generateFollowUpQuestions(prompt: string): Promise<GenerationResult<string[]>> {
-  const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("API Key is missing. Please ensure GEMINI_API_KEY is configured.");
+function cleanJsonString(str: string): string {
+  let cleaned = str.trim();
+  if (cleaned.startsWith("```json")) {
+    cleaned = cleaned.replace(/^```json\s*/i, "").replace(/\s*```$/i, "");
+  } else if (cleaned.startsWith("```")) {
+    cleaned = cleaned.replace(/^```\s*/i, "").replace(/\s*```$/i, "");
+  }
+  return cleaned.trim();
+}
+
+async function callOpenRouter(systemInstruction: string, prompt: string, isJson: boolean): Promise<{ text: string, usage: UsageMetadata }> {
+  const openRouterKey = process.env.OPENROUTER_API_KEY;
+  if (!openRouterKey) {
+    throw new Error("Both GEMINI_API_KEY and OPENROUTER_API_KEY fallback are missing.");
   }
 
-  const ai = new GoogleGenAI({ apiKey });
-  
+  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${openRouterKey}`,
+      "HTTP-Referer": typeof window !== "undefined" ? window.location.origin : "",
+      "X-Title": "TheDesignAI"
+    },
+    body: JSON.stringify({
+      model: "google/gemini-2.5-flash",
+      messages: [
+        { role: "system", content: systemInstruction },
+        { role: "user", content: prompt }
+      ],
+      temperature: isJson ? 0.7 : 0.2,
+      response_format: isJson ? { type: "json_object" } : undefined
+    })
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new Error(`OpenRouter API error: ${response.status} ${errText}`);
+  }
+
+  const data = await response.json();
+  const text = data.choices?.[0]?.message?.content || "";
+  const usage: UsageMetadata = {
+    promptTokenCount: data.usage?.prompt_tokens || 0,
+    candidatesTokenCount: data.usage?.completion_tokens || 0,
+    totalTokenCount: data.usage?.total_tokens || 0
+  };
+
+  return { text, usage };
+}
+
+export async function generateFollowUpQuestions(prompt: string): Promise<GenerationResult<string[]>> {
+  const apiKey = process.env.GEMINI_API_KEY;
   const systemInstruction = `
     You are an expert product manager and UX researcher.
     The user wants to build a design (UI, poster, logo, etc.) based on their prompt.
@@ -27,52 +72,57 @@ export async function generateFollowUpQuestions(prompt: string): Promise<Generat
     Return a JSON array of exactly 5 strings, where each string is a question.
   `.trim();
 
-  try {
-    const response: GenerateContentResponse = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: `User prompt: ${prompt}`,
-      config: {
-        systemInstruction,
-        temperature: 0.7,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.STRING
+  if (apiKey) {
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const response: GenerateContentResponse = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `User prompt: ${prompt}`,
+        config: {
+          systemInstruction,
+          temperature: 0.7,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.STRING
+            }
           }
         }
+      });
+
+      const jsonText = response.text;
+      if (jsonText) {
+        const usage: UsageMetadata = {
+          promptTokenCount: response.usageMetadata?.promptTokenCount || 0,
+          candidatesTokenCount: response.usageMetadata?.candidatesTokenCount || 0,
+          totalTokenCount: response.usageMetadata?.totalTokenCount || 0
+        };
+        return {
+          data: JSON.parse(jsonText.trim()),
+          usage
+        };
       }
-    });
-
-    const jsonText = response.text;
-    if (!jsonText) {
-      throw new Error("The AI model returned an empty response.");
+    } catch (error) {
+      console.warn("Primary Gemini API failed, attempting OpenRouter fallback...", error);
     }
-    
-    const usage: UsageMetadata = {
-      promptTokenCount: response.usageMetadata?.promptTokenCount || 0,
-      candidatesTokenCount: response.usageMetadata?.candidatesTokenCount || 0,
-      totalTokenCount: response.usageMetadata?.totalTokenCount || 0
-    };
+  }
 
+  try {
+    const { text, usage } = await callOpenRouter(systemInstruction, `User prompt: ${prompt}`, true);
+    const cleaned = cleanJsonString(text);
     return {
-      data: JSON.parse(jsonText.trim()),
+      data: JSON.parse(cleaned),
       usage
     };
-  } catch (error) {
-    console.error("Anqair Question Generation Error:", error);
-    throw error;
+  } catch (err) {
+    console.error("Both Gemini API and OpenRouter fallback failed:", err);
+    throw err;
   }
 }
 
 export async function generateUIVariants(prompt: string, questions: string[] = [], answers: string[] = []): Promise<GenerationResult<UIVariant[]>> {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("API Key is missing. Please ensure GEMINI_API_KEY is configured.");
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
-  
   const systemInstruction = `
     You are Flash UI, a master UI/UX designer and world-class frontend engineer. 
     Your mission is to generate THREE RADICAL CONCEPTUAL VARIATIONS for the user's prompt.
@@ -104,48 +154,66 @@ export async function generateUIVariants(prompt: string, questions: string[] = [
   `.trim();
 
   const contents: any[] = [`Generate 3 design variations for: ${prompt}`];
-  
   if (answers.length > 0 && questions.length > 0) {
     contents.push(`\n\nUser's answers to clarifying questions:\n${questions.map((q, i) => `Q: ${q}\nA: ${answers[i]}`).join('\n\n')}`);
   }
+  const promptContent = contents.join('\n');
 
-  try {
-    const response: GenerateContentResponse = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents,
-      config: {
-        systemInstruction,
-        temperature: 1.0,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              label: { type: Type.STRING },
-              html: { type: Type.STRING },
-              description: { type: Type.STRING }
-            },
-            required: ["label", "html", "description"]
+  if (apiKey) {
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const response: GenerateContentResponse = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: [promptContent],
+        config: {
+          systemInstruction,
+          temperature: 1.0,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                label: { type: Type.STRING },
+                html: { type: Type.STRING },
+                description: { type: Type.STRING }
+              },
+              required: ["label", "html", "description"]
+            }
           }
         }
+      });
+
+      const jsonText = response.text;
+      if (jsonText) {
+        const usage: UsageMetadata = {
+          promptTokenCount: response.usageMetadata?.promptTokenCount || 0,
+          candidatesTokenCount: response.usageMetadata?.candidatesTokenCount || 0,
+          totalTokenCount: response.usageMetadata?.totalTokenCount || 0
+        };
+
+        const parsedData = JSON.parse(jsonText.trim());
+        const variants = parsedData.map((v: any, i: number) => ({
+          ...v,
+          id: `variant-${Date.now()}-${i}`
+        }));
+
+        return {
+          data: variants,
+          usage
+        };
       }
-    });
-
-    const jsonText = response.text;
-    if (!jsonText) {
-      throw new Error("The AI model returned an empty response.");
+    } catch (error) {
+      console.warn("Primary Gemini API failed, attempting OpenRouter fallback...", error);
     }
-    
-    const usage: UsageMetadata = {
-      promptTokenCount: response.usageMetadata?.promptTokenCount || 0,
-      candidatesTokenCount: response.usageMetadata?.candidatesTokenCount || 0,
-      totalTokenCount: response.usageMetadata?.totalTokenCount || 0
-    };
+  }
 
-    const parsedData = JSON.parse(jsonText.trim());
-    
-    const variants = parsedData.map((v: any, i: number) => ({
+  try {
+    const { text, usage } = await callOpenRouter(systemInstruction, promptContent, true);
+    const cleaned = cleanJsonString(text);
+    const parsedData = JSON.parse(cleaned);
+    const rawVariants = Array.isArray(parsedData) ? parsedData : (parsedData.variants || parsedData.data || []);
+    const variants = rawVariants.map((v: any, i: number) => ({
       ...v,
       id: `variant-${Date.now()}-${i}`
     }));
@@ -154,23 +222,16 @@ export async function generateUIVariants(prompt: string, questions: string[] = [
       data: variants,
       usage
     };
-  } catch (error) {
-    console.error("Anqair Generation Error:", error);
-    throw error;
+  } catch (err) {
+    console.error("Both Gemini API and OpenRouter fallback failed:", err);
+    throw err;
   }
 }
 
 export const modifyUI = async (currentHtml: string, prompt: string): Promise<GenerationResult<string>> => {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("API Key is missing. Please ensure GEMINI_API_KEY is configured.");
-  }
-  const ai = new GoogleGenAI({ apiKey });
-  const response = await ai.models.generateContent({
-    model: "gemini-3-flash-preview",
-    contents: `You are an expert UI/UX developer and design master.
-
-CURRENT HTML (Inner content of <body>):
+  const sysInstruction = `You are an expert UI/UX developer and design master.`;
+  const promptContent = `CURRENT HTML (Inner content of <body>):
 ${currentHtml}
 
 USER REQUEST:
@@ -183,35 +244,51 @@ Rules:
 3. Use Tailwind CSS classes for all styling.
 4. **IP SAFEGUARD**: Do not use brand or artist names.
 5. **Material Logic**: Maintain the physical metaphors (e.g., grain, layering, grids, gradients) already present in the design or requested.
-6. Return the raw HTML string only without markdown fences.`,
-    config: {
-      temperature: 0.2,
-    }
-  });
-  
-  let html = response.text || '';
-  html = html.replace(/```html\n?/g, '').replace(/```\n?/g, '');
-  
-  const usage: UsageMetadata = {
-    promptTokenCount: response.usageMetadata?.promptTokenCount || 0,
-    candidatesTokenCount: response.usageMetadata?.candidatesTokenCount || 0,
-    totalTokenCount: response.usageMetadata?.totalTokenCount || 0
-  };
+6. Return the raw HTML string only without markdown fences.`;
 
-  return {
-    data: html,
-    usage
-  };
+  if (apiKey) {
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const response = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `${sysInstruction}\n\n${promptContent}`,
+        config: {
+          temperature: 0.2,
+        }
+      });
+      
+      let html = response.text || '';
+      html = html.replace(/```html\n?/g, '').replace(/```\n?/g, '');
+      const usage: UsageMetadata = {
+        promptTokenCount: response.usageMetadata?.promptTokenCount || 0,
+        candidatesTokenCount: response.usageMetadata?.candidatesTokenCount || 0,
+        totalTokenCount: response.usageMetadata?.totalTokenCount || 0
+      };
+      return {
+        data: html,
+        usage
+      };
+    } catch (error) {
+      console.warn("Primary Gemini API failed, attempting OpenRouter fallback...", error);
+    }
+  }
+
+  try {
+    const { text, usage } = await callOpenRouter(sysInstruction, promptContent, false);
+    let html = text || '';
+    html = html.replace(/```html\n?/g, '').replace(/```\n?/g, '');
+    return {
+      data: html,
+      usage
+    };
+  } catch (err) {
+    console.error("Both Gemini API and OpenRouter fallback failed:", err);
+    throw err;
+  }
 };
 
 export async function generateDesignSuggestions(currentHtml: string): Promise<GenerationResult<DesignSuggestion[]>> {
   const apiKey = process.env.GEMINI_API_KEY;
-  if (!apiKey) {
-    throw new Error("API Key is missing. Please ensure GEMINI_API_KEY is configured.");
-  }
-
-  const ai = new GoogleGenAI({ apiKey });
-  
   const systemInstruction = `
     You are an expert design critic and UI/UX consultant.
     Your task is to analyze the provided HTML/Tailwind CSS code and suggest 3-4 specific improvements.
@@ -232,42 +309,60 @@ export async function generateDesignSuggestions(currentHtml: string): Promise<Ge
     Return a JSON array of objects.
   `.trim();
 
-  try {
-    const response: GenerateContentResponse = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
-      contents: `Current HTML code:\n\n${currentHtml}`,
-      config: {
-        systemInstruction,
-        temperature: 0.7,
-        responseMimeType: "application/json",
-        responseSchema: {
-          type: Type.ARRAY,
-          items: {
-            type: Type.OBJECT,
-            properties: {
-              title: { type: Type.STRING },
-              description: { type: Type.STRING },
-              action: { type: Type.STRING }
-            },
-            required: ["title", "description", "action"]
+  if (apiKey) {
+    try {
+      const ai = new GoogleGenAI({ apiKey });
+      const response: GenerateContentResponse = await ai.models.generateContent({
+        model: "gemini-3-flash-preview",
+        contents: `Current HTML code:\n\n${currentHtml}`,
+        config: {
+          systemInstruction,
+          temperature: 0.7,
+          responseMimeType: "application/json",
+          responseSchema: {
+            type: Type.ARRAY,
+            items: {
+              type: Type.OBJECT,
+              properties: {
+                title: { type: Type.STRING },
+                description: { type: Type.STRING },
+                action: { type: Type.STRING }
+              },
+              required: ["title", "description", "action"]
+            }
           }
         }
+      });
+
+      const jsonText = response.text;
+      if (jsonText) {
+        const usage: UsageMetadata = {
+          promptTokenCount: response.usageMetadata?.promptTokenCount || 0,
+          candidatesTokenCount: response.usageMetadata?.candidatesTokenCount || 0,
+          totalTokenCount: response.usageMetadata?.totalTokenCount || 0
+        };
+        const parsedData = JSON.parse(jsonText.trim());
+        const suggestions = parsedData.map((s: any, i: number) => ({
+          ...s,
+          id: `suggestion-${Date.now()}-${i}`
+        }));
+
+        return {
+          data: suggestions,
+          usage
+        };
       }
-    });
-
-    const jsonText = response.text;
-    if (!jsonText) {
-      throw new Error("The AI model returned an empty response.");
+    } catch (error) {
+      console.warn("Primary Gemini API failed, attempting OpenRouter fallback...", error);
     }
-    
-    const usage: UsageMetadata = {
-      promptTokenCount: response.usageMetadata?.promptTokenCount || 0,
-      candidatesTokenCount: response.usageMetadata?.candidatesTokenCount || 0,
-      totalTokenCount: response.usageMetadata?.totalTokenCount || 0
-    };
+  }
 
-    const parsedData = JSON.parse(jsonText.trim());
-    const suggestions = parsedData.map((s: any, i: number) => ({
+  try {
+    const { text, usage } = await callOpenRouter(systemInstruction, `Current HTML code:\n\n${currentHtml}`, true);
+    const cleaned = cleanJsonString(text);
+    const parsedData = JSON.parse(cleaned);
+    const rawSuggestions = Array.isArray(parsedData) ? parsedData : (parsedData.suggestions || parsedData.data || []);
+    const suggestions = rawSuggestions.map((s: any, i: number) => ({
       ...s,
       id: `suggestion-${Date.now()}-${i}`
     }));
@@ -276,8 +371,8 @@ export async function generateDesignSuggestions(currentHtml: string): Promise<Ge
       data: suggestions,
       usage
     };
-  } catch (error) {
-    console.error("Design Suggestion Generation Error:", error);
-    throw error;
+  } catch (err) {
+    console.error("Both Gemini API and OpenRouter fallback failed:", err);
+    throw err;
   }
 }
