@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'motion/react';
 import { ArrowRight, ChevronLeft, ChevronRight, Sparkles, Loader2, X, User as UserIcon, LogOut, History, Download, MessageSquare, Send, LayoutGrid, ShieldAlert, Lock, CreditCard, Users, TrendingUp, Coins, Activity, Eye, RefreshCw, Trash2, ArrowUpRight, CheckCircle, AlignLeft, AlignCenter, AlignRight, Palette, Sliders, Type, Grid, Check, Paintbrush, Circle, Layers, SlidersHorizontal, MousePointerClick, CheckSquare } from 'lucide-react';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import { AppView, UIVariant, UserProfile, Project, ChatMessage, UsageMetadata, DesignSuggestion, SavedDesign } from './types.ts';
-import { generateFollowUpQuestions, generateUIVariants, modifyUI, generateDesignSuggestions } from './services/geminiService.ts';
+import { generateFollowUpQuestions, generateUIVariants, modifyUI, generateDesignSuggestions, getPreferredProvider } from './services/geminiService.ts';
 import { UIPreview } from './components/UIPreview.tsx';
 import { OnboardingTutorial } from './components/OnboardingTutorial.tsx';
 import DottedGlowBackground from './components/DottedGlowBackground.tsx';
@@ -485,6 +485,12 @@ const App: React.FC = () => {
   const [adminLogTab, setAdminLogTab] = useState<'projects' | 'chatbot'>('projects');
   const [isAdminLoading, setIsAdminLoading] = useState(false);
   const [selectedAdminUser, setSelectedAdminUser] = useState<UserProfile | null>(null);
+  const [preferredApiProvider, setPreferredApiProvider] = useState<'gemini' | 'openrouter'>(getPreferredProvider);
+
+  const handleToggleApiProvider = (provider: 'gemini' | 'openrouter') => {
+    setPreferredApiProvider(provider);
+    localStorage.setItem('preferred_api_provider', provider);
+  };
 
   const fetchAdminData = async () => {
     setIsAdminLoading(true);
@@ -1946,6 +1952,37 @@ const App: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-3">
+            {/* Preferred API Provider Toggle Control */}
+            <div className="hidden sm:flex items-center gap-2 bg-zinc-950/60 border border-white/5 rounded-full px-3 py-1 mr-1">
+              <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Preferred API:</span>
+              <div className="flex items-center bg-black/60 border border-white/10 rounded-full p-0.5 gap-0.5">
+                <button
+                  type="button"
+                  onClick={() => handleToggleApiProvider('gemini')}
+                  className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase transition-all duration-200 flex items-center gap-1 ${
+                    preferredApiProvider === 'gemini'
+                      ? 'bg-emerald-500 text-black'
+                      : 'text-zinc-400 hover:text-indigo-200'
+                  }`}
+                >
+                  <Sparkles className="w-2.5 h-2.5" />
+                  <span>Gemini</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleToggleApiProvider('openrouter')}
+                  className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase transition-all duration-200 flex items-center gap-1 ${
+                    preferredApiProvider === 'openrouter'
+                      ? 'bg-purple-600 text-white'
+                      : 'text-zinc-400 hover:text-indigo-200'
+                  }`}
+                >
+                  <Activity className="w-2.5 h-2.5" />
+                  <span>OpenRouter</span>
+                </button>
+              </div>
+            </div>
+
             <button 
               onClick={fetchAdminData}
               disabled={isAdminLoading}
@@ -1974,6 +2011,51 @@ const App: React.FC = () => {
             </div>
           ) : (
             <>
+              {/* Dynamic Gateway Selector Dashboard Widget */}
+              <div className="bg-zinc-950/40 backdrop-blur-xl border border-white/5 rounded-3xl p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative overflow-hidden group">
+                <div className="flex items-start gap-4">
+                  <div className="p-3 rounded-2xl bg-white/5 border border-white/10 shrink-0">
+                    <Sliders className="w-6 h-6 text-indigo-400" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-white tracking-tight">Dynamic Generation API Routing</h3>
+                    <p className="text-xs text-zinc-400 mt-1 max-w-2xl leading-relaxed">
+                      Choose which AI gateway to route design logic, clarifying interviews, and variant drafts by default. The inactive provider will automatically act as a high-fidelity failover fallback.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto shrink-0 z-10">
+                  <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest text-center sm:text-left">Selected Core Gateway:</span>
+                  <div className="flex bg-black/60 border border-white/10 rounded-full p-1 gap-1">
+                    <button
+                      type="button"
+                      onClick={() => handleToggleApiProvider('gemini')}
+                      className={`flex-1 sm:flex-initial px-5 py-2 rounded-full text-[11px] font-bold tracking-wider uppercase transition-all duration-300 flex items-center justify-center gap-2 ${
+                        preferredApiProvider === 'gemini'
+                          ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/25 scale-[1.02]'
+                          : 'text-zinc-400 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Gemini API (Primary)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleToggleApiProvider('openrouter')}
+                      className={`flex-1 sm:flex-initial px-5 py-2 rounded-full text-[11px] font-bold tracking-wider uppercase transition-all duration-300 flex items-center justify-center gap-2 ${
+                        preferredApiProvider === 'openrouter'
+                          ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/25 scale-[1.02]'
+                          : 'text-zinc-400 hover:text-white hover:bg-white/5'
+                      }`}
+                    >
+                      <Activity className="w-3.5 h-3.5" />
+                      <span>OpenRouter (Primary)</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+
               {/* Telemetry Bento Grid */}
               <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
                      {/* 1. Cost */}
