@@ -31,7 +31,7 @@ async function callOpenRouter(systemInstruction: string, prompt: string, isJson:
       "X-Title": "TheDesignAI"
     },
     body: JSON.stringify({
-      model: "google/gemini-2.5-flash",
+      model: "google/gemini-3-flash-preview",
       messages: [
         { role: "system", content: systemInstruction },
         { role: "user", content: prompt }
