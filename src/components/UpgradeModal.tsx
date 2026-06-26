@@ -32,8 +32,9 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ user, onClose }) => 
     try {
       // Access the optional payment link from client settings
       const configuredPaymentLink = (import.meta as any).env?.VITE_STRIPE_PAYMENT_LINK;
+      const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || "";
       
-      const response = await fetch('/api/stripe/create-checkout-session', {
+      const response = await fetch(`${API_BASE_URL}/api/stripe/create-checkout-session`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',

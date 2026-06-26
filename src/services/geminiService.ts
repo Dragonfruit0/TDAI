@@ -5,6 +5,8 @@ export interface GenerationResult<T> {
   usage: UsageMetadata;
 }
 
+const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || "";
+
 export function getPreferredProvider(): "gemini" | "openrouter" {
   if (typeof window !== "undefined") {
     return (localStorage.getItem("preferred_api_provider") as "gemini" | "openrouter") || "gemini";
@@ -14,7 +16,7 @@ export function getPreferredProvider(): "gemini" | "openrouter" {
 
 export async function generateFollowUpQuestions(prompt: string): Promise<GenerationResult<string[]>> {
   const preferred = getPreferredProvider();
-  const response = await fetch("/api/ai/follow-up", {
+  const response = await fetch(`${API_BASE_URL}/api/ai/follow-up`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -36,7 +38,7 @@ export async function generateUIVariants(
   answers: string[] = []
 ): Promise<GenerationResult<UIVariant[]>> {
   const preferred = getPreferredProvider();
-  const response = await fetch("/api/ai/ui-variants", {
+  const response = await fetch(`${API_BASE_URL}/api/ai/ui-variants`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -54,7 +56,7 @@ export async function generateUIVariants(
 
 export async function modifyUI(currentHtml: string, prompt: string): Promise<GenerationResult<string>> {
   const preferred = getPreferredProvider();
-  const response = await fetch("/api/ai/modify-ui", {
+  const response = await fetch(`${API_BASE_URL}/api/ai/modify-ui`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -72,7 +74,7 @@ export async function modifyUI(currentHtml: string, prompt: string): Promise<Gen
 
 export async function generateDesignSuggestions(currentHtml: string): Promise<GenerationResult<DesignSuggestion[]>> {
   const preferred = getPreferredProvider();
-  const response = await fetch("/api/ai/suggestions", {
+  const response = await fetch(`${API_BASE_URL}/api/ai/suggestions`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
