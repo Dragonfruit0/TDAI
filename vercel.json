@@ -3,6 +3,10 @@
     {
       "source": "/api/:path*",
       "destination": "https://tdai-y9rj.onrender.com/api/:path*"
+    },
+    {
+      "source": "/__/auth/:path*",
+      "destination": "https://gen-lang-client-0106292639.firebaseapp.com/__/auth/:path*"
     }
   ]
 }
