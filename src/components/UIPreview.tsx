@@ -180,6 +180,9 @@ export const UIPreview: React.FC<UIPreviewProps> = ({ html, isEditable = false }
           }
 
           window.addEventListener('message', function(event) {
+            // Verify message is coming from the parent window
+            if (event.source !== window.parent) return;
+
             if (event.data?.type === 'SET_EDIT_MODE') {
               isEditable = event.data.isEditable;
               if (!isEditable) {

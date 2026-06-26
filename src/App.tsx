@@ -657,6 +657,9 @@ const App: React.FC = () => {
 
   useEffect(() => {
     const handleMessage = (event: MessageEvent) => {
+      const iframe = document.getElementById('ui-preview-iframe') as HTMLIFrameElement | null;
+      if (iframe && event.source !== iframe.contentWindow) return;
+
       if (event.data?.type === 'UI_EDITED' && event.data.html) {
         setBuilderHtml(event.data.html);
       } else if (event.data?.type === 'ELEMENT_SELECTED') {
@@ -1092,7 +1095,11 @@ const App: React.FC = () => {
     setIsChatGenerating(true);
     
     try {
-      const result = await modifyUI(builderHtml, userMsg);
+      let streamedHtml = "";
+      const result = await modifyUI(builderHtml, userMsg, (chunk) => {
+        streamedHtml += chunk;
+        setBuilderHtml(streamedHtml);
+      });
       const updatedHtml = result.data;
       const usage = result.usage;
       const cost = calculateCost(usage);

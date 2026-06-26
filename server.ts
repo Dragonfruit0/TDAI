@@ -3,8 +3,10 @@ import path from 'path';
 import Stripe from 'stripe';
 import { initializeApp } from 'firebase-admin/app';
 import { getFirestore } from 'firebase-admin/firestore';
+import { getAuth as getAdminAuth } from 'firebase-admin/auth';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
+import rateLimit from 'express-rate-limit';
 
 // Load environment variables
 dotenv.config();
@@ -13,6 +15,7 @@ import {
   generateFollowUpQuestionsServer, 
   generateUIVariantsServer, 
   modifyUIServer, 
+  modifyUIServerStream,
   generateDesignSuggestionsServer 
 } from './server/aiService.ts';
 
@@ -58,12 +61,10 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
     const stripe = getStripe();
     let event: Stripe.Event;
 
-    if (webhookSecret) {
-      event = stripe.webhooks.constructEvent(req.body, sig as string, webhookSecret);
-    } else {
-      console.warn('Warning: STRIPE_WEBHOOK_SECRET is not configured. Webhook payload integrity is not verified.');
-      event = JSON.parse(req.body.toString());
+    if (!webhookSecret) {
+      throw new Error('STRIPE_WEBHOOK_SECRET environment variable is not configured. Webhook processing aborted for security.');
     }
+    event = stripe.webhooks.constructEvent(req.body, sig as string, webhookSecret);
 
     console.log(`Received webhook event: ${event.type}`);
 
@@ -100,9 +101,28 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
   }
 });
 
-// CORS middleware for cross-origin requests from Vercel to Render
+// CORS configuration with known origin allowlist & dynamic developer previews
+const ALLOWED_ORIGINS = [
+  'https://thedesignai.com',
+  'https://www.thedesignai.com',
+  'https://tdai-y9rj.onrender.com',
+  'http://localhost:3000'
+];
+
+function isOriginAllowed(origin: string): boolean {
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  if (origin.endsWith('.run.app') || origin.includes('localhost') || origin.includes('127.0.0.1')) return true;
+  return false;
+}
+
 app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
+  const origin = req.headers.origin;
+  if (origin && isOriginAllowed(origin)) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Vary', 'Origin');
+  } else if (process.env.NODE_ENV !== 'production') {
+    res.header('Access-Control-Allow-Origin', '*');
+  }
   res.header('Access-Control-Allow-Methods', 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, X-Title');
   if (req.method === 'OPTIONS') {
@@ -111,57 +131,166 @@ app.use((req, res, next) => {
   next();
 });
 
-// JSON body parser for other normal API routes
+// JSON body parser for normal API routes
 app.use(express.json());
 
+// Firebase ID Token Verification Middleware
+async function requireAuth(req: any, res: any, next: any) {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) {
+    res.status(401).json({ error: 'Unauthorized: Missing or invalid Authorization header.' });
+    return;
+  }
+  try {
+    const token = authHeader.split('Bearer ')[1];
+    const decodedToken = await getAdminAuth().verifyIdToken(token);
+    req.user = decodedToken;
+    next();
+  } catch (error) {
+    console.error('Error verifying Firebase ID token:', error);
+    res.status(401).json({ error: 'Unauthorized: Invalid token.' });
+  }
+}
+
+// Usage Limits verification for Free tier on the server-side
+async function checkUsageLimits(req: any, res: any, next: any) {
+  const userId = req.user.uid;
+  const userEmail = req.user.email;
+  
+  if (userEmail === 'thedesignai3@gmail.com') {
+    next();
+    return;
+  }
+  
+  try {
+    const userDoc = await adminDb.collection('users').doc(userId).get();
+    const userData = userDoc.data();
+    const isPro = userData?.subscription?.status === 'active';
+    
+    if (isPro) {
+      next();
+      return;
+    }
+    
+    const startOfToday = new Date();
+    startOfToday.setHours(0, 0, 0, 0);
+    const startOfTodayIso = startOfToday.toISOString();
+    
+    const projectsSnap = await adminDb.collection('projects')
+      .where('userId', '==', userId)
+      .where('createdAt', '>=', startOfTodayIso)
+      .get();
+      
+    if (projectsSnap.size >= 3) {
+      res.status(429).json({
+        error: 'Usage limit reached: Free tier is limited to 3 generations per day. Please upgrade to Pro to continue.',
+        limitReached: true
+      });
+      return;
+    }
+    
+    next();
+  } catch (error) {
+    console.error('Error checking usage limits on server:', error);
+    next();
+  }
+}
+
+// Server-side input size limits for HTML payload safety
+const MAX_HTML_SIZE = 50_000; // 50KB maximum size to prevent excessive payload injection
+function validateHtmlSize(req: any, res: any, next: any) {
+  const { currentHtml } = req.body;
+  if (currentHtml && currentHtml.length > MAX_HTML_SIZE) {
+    res.status(400).json({ error: 'HTML payload is too large. Maximum size is 50KB.' });
+    return;
+  }
+  next();
+}
+
+// API rate limit implementation for all AI-powered routes
+const aiRateLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 30, // 30 requests per IP address
+  message: { error: 'Too many requests, please slow down.' },
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Secure proxy endpoints for model generations
-app.post('/api/ai/follow-up', async (req, res) => {
+app.post('/api/ai/follow-up', aiRateLimiter, requireAuth, checkUsageLimits, async (req, res) => {
   const { prompt, preferred } = req.body;
   try {
     const result = await generateFollowUpQuestionsServer(prompt, preferred);
     res.json(result);
   } catch (error: any) {
     console.error('Error in /api/ai/follow-up:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An error occurred while generating follow-up questions.' });
   }
 });
 
-app.post('/api/ai/ui-variants', async (req, res) => {
+app.post('/api/ai/ui-variants', aiRateLimiter, requireAuth, checkUsageLimits, async (req, res) => {
   const { prompt, questions, answers, preferred } = req.body;
   try {
     const result = await generateUIVariantsServer(prompt, questions, answers, preferred);
     res.json(result);
   } catch (error: any) {
     console.error('Error in /api/ai/ui-variants:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An error occurred while generating UI variants.' });
   }
 });
 
-app.post('/api/ai/modify-ui', async (req, res) => {
-  const { currentHtml, prompt, preferred } = req.body;
+app.post('/api/ai/modify-ui', aiRateLimiter, requireAuth, checkUsageLimits, validateHtmlSize, async (req, res) => {
+  const { currentHtml, prompt, preferred, stream } = req.body;
   try {
-    const result = await modifyUIServer(currentHtml, prompt, preferred);
-    res.json(result);
+    if (stream) {
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      });
+
+      await modifyUIServerStream(currentHtml, prompt, preferred, (chunk, usage) => {
+        const payload = { chunk, ...(usage ? { usage } : {}) };
+        res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      });
+
+      res.write(`data: [DONE]\n\n`);
+      res.end();
+    } else {
+      const result = await modifyUIServer(currentHtml, prompt, preferred);
+      res.json(result);
+    }
   } catch (error: any) {
     console.error('Error in /api/ai/modify-ui:', error);
-    res.status(500).json({ error: error.message });
+    if (stream) {
+      res.write(`data: ${JSON.stringify({ error: 'An error occurred while modifying the UI.' })}\n\n`);
+      res.end();
+    } else {
+      res.status(500).json({ error: 'An error occurred while modifying the UI.' });
+    }
   }
 });
 
-app.post('/api/ai/suggestions', async (req, res) => {
+app.post('/api/ai/suggestions', aiRateLimiter, requireAuth, checkUsageLimits, validateHtmlSize, async (req, res) => {
   const { currentHtml, preferred } = req.body;
   try {
     const result = await generateDesignSuggestionsServer(currentHtml, preferred);
     res.json(result);
   } catch (error: any) {
     console.error('Error in /api/ai/suggestions:', error);
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: 'An error occurred while generating design suggestions.' });
   }
 });
 
 // API route to create a checkout session
-app.post('/api/stripe/create-checkout-session', async (req, res) => {
+app.post('/api/stripe/create-checkout-session', requireAuth, async (req, res) => {
   const { userId, userEmail, appUrl } = req.body;
+
+  // Prevent user spoofing: verify request uid matches userId
+  if ((req as any).user.uid !== userId) {
+    res.status(403).json({ error: 'Forbidden: You cannot create a session for another user.' });
+    return;
+  }
 
   if (!userId) {
     res.status(400).json({ error: 'Missing userId parameter' });
@@ -171,8 +300,17 @@ app.post('/api/stripe/create-checkout-session', async (req, res) => {
   try {
     const stripe = getStripe();
     
-    // Use user-provided app url or fallback to container configuration
-    const baseUrl = appUrl || process.env.APP_URL || 'http://localhost:3000';
+    // Validate redirect URL to prevent open redirect vulnerabilities
+    let baseUrl = appUrl || process.env.APP_URL || 'http://localhost:3000';
+    try {
+      const parsedUrl = new URL(baseUrl);
+      if (!isOriginAllowed(parsedUrl.origin)) {
+        console.warn(`Unsafe appUrl provided: ${baseUrl}. Falling back to default URL.`);
+        baseUrl = process.env.APP_URL || 'http://localhost:3000';
+      }
+    } catch {
+      baseUrl = process.env.APP_URL || 'http://localhost:3000';
+    }
 
     const session = await stripe.checkout.sessions.create({
       payment_method_types: ['card'],
@@ -207,8 +345,15 @@ app.post('/api/stripe/create-checkout-session', async (req, res) => {
 });
 
 // Sync endpoint to look up live Firebase/Stripe profile status
-app.get('/api/stripe/status/:userId', async (req, res) => {
+app.get('/api/stripe/status/:userId', requireAuth, async (req, res) => {
   const { userId } = req.params;
+
+  // Verify ownership to prevent unauthorized data leaks (Issue 7)
+  if ((req as any).user.uid !== userId && (req as any).user.email !== 'thedesignai3@gmail.com') {
+    res.status(403).json({ error: 'Forbidden: You do not have permission to access this user\'s billing status.' });
+    return;
+  }
+
   try {
     const userDoc = await adminDb.collection('users').doc(userId).get();
     if (!userDoc.exists) {
@@ -219,7 +364,8 @@ app.get('/api/stripe/status/:userId', async (req, res) => {
     const isPro = data?.subscription?.status === 'active';
     res.json({ active: isPro, subscription: data?.subscription || null });
   } catch (error: any) {
-    res.status(500).json({ error: error.message });
+    console.error('Error fetching subscription status:', error);
+    res.status(500).json({ error: 'Failed to retrieve subscription status.' });
   }
 });
 
