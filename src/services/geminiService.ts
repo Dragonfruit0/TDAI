@@ -1,11 +1,10 @@
 import { UIVariant, UsageMetadata, DesignSuggestion } from "../types.ts";
+import { apiFetch } from "./api.ts";
 
 export interface GenerationResult<T> {
   data: T;
   usage: UsageMetadata;
 }
-
-const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || "";
 
 export function getPreferredProvider(): "gemini" | "openrouter" {
   return "gemini";
@@ -13,11 +12,8 @@ export function getPreferredProvider(): "gemini" | "openrouter" {
 
 export async function generateFollowUpQuestions(prompt: string): Promise<GenerationResult<string[]>> {
   const preferred = getPreferredProvider();
-  const response = await fetch(`${API_BASE_URL}/api/ai/follow-up`, {
+  const response = await apiFetch("/api/ai/follow-up", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify({ prompt, preferred }),
   });
 
@@ -35,11 +31,8 @@ export async function generateUIVariants(
   answers: string[] = []
 ): Promise<GenerationResult<UIVariant[]>> {
   const preferred = getPreferredProvider();
-  const response = await fetch(`${API_BASE_URL}/api/ai/ui-variants`, {
+  const response = await apiFetch("/api/ai/ui-variants", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify({ prompt, questions, answers, preferred }),
   });
 
@@ -53,11 +46,8 @@ export async function generateUIVariants(
 
 export async function modifyUI(currentHtml: string, prompt: string): Promise<GenerationResult<string>> {
   const preferred = getPreferredProvider();
-  const response = await fetch(`${API_BASE_URL}/api/ai/modify-ui`, {
+  const response = await apiFetch("/api/ai/modify-ui", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify({ currentHtml, prompt, preferred }),
   });
 
@@ -71,11 +61,8 @@ export async function modifyUI(currentHtml: string, prompt: string): Promise<Gen
 
 export async function generateDesignSuggestions(currentHtml: string): Promise<GenerationResult<DesignSuggestion[]>> {
   const preferred = getPreferredProvider();
-  const response = await fetch(`${API_BASE_URL}/api/ai/suggestions`, {
+  const response = await apiFetch("/api/ai/suggestions", {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-    },
     body: JSON.stringify({ currentHtml, preferred }),
   });
 
@@ -86,3 +73,4 @@ export async function generateDesignSuggestions(currentHtml: string): Promise<Ge
 
   return response.json();
 }
+

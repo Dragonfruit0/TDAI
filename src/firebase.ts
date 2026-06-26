@@ -4,7 +4,13 @@ import { getFirestore, doc, setDoc, getDoc, collection, addDoc, query, where, ge
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase SDK
-const app = initializeApp(firebaseConfig);
+const customAuthDomain = (import.meta as any).env?.VITE_FIREBASE_AUTH_DOMAIN;
+const config = {
+  ...firebaseConfig,
+  ...(customAuthDomain ? { authDomain: customAuthDomain } : {})
+};
+
+const app = initializeApp(config);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();

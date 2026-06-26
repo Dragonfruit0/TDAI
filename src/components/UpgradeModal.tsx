@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import { X, Sparkles, CreditCard, CheckCircle, Loader2, Shield, Lock, AlertCircle } from 'lucide-react';
 import { UserProfile } from '../types.ts';
+import { apiFetch } from '../services/api.ts';
 
 interface UpgradeModalProps {
   user: UserProfile | null;
@@ -32,13 +33,9 @@ export const UpgradeModal: React.FC<UpgradeModalProps> = ({ user, onClose }) => 
     try {
       // Access the optional payment link from client settings
       const configuredPaymentLink = (import.meta as any).env?.VITE_STRIPE_PAYMENT_LINK;
-      const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || "";
       
-      const response = await fetch(`${API_BASE_URL}/api/stripe/create-checkout-session`, {
+      const response = await apiFetch('/api/stripe/create-checkout-session', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify({
           userId: user.uid,
           userEmail: user.email,
