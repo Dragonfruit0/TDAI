@@ -9,6 +9,13 @@ import dotenv from 'dotenv';
 // Load environment variables
 dotenv.config();
 
+import { 
+  generateFollowUpQuestionsServer, 
+  generateUIVariantsServer, 
+  modifyUIServer, 
+  generateDesignSuggestionsServer 
+} from './server/aiService.ts';
+
 // Initialize Firebase Admin using credentials present in the sandbox
 import firebaseConfig from './firebase-applet-config.json' with { type: 'json' };
 
@@ -95,6 +102,51 @@ app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async
 
 // JSON body parser for other normal API routes
 app.use(express.json());
+
+// Secure proxy endpoints for model generations
+app.post('/api/ai/follow-up', async (req, res) => {
+  const { prompt, preferred } = req.body;
+  try {
+    const result = await generateFollowUpQuestionsServer(prompt, preferred);
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error in /api/ai/follow-up:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/ai/ui-variants', async (req, res) => {
+  const { prompt, questions, answers, preferred } = req.body;
+  try {
+    const result = await generateUIVariantsServer(prompt, questions, answers, preferred);
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error in /api/ai/ui-variants:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/ai/modify-ui', async (req, res) => {
+  const { currentHtml, prompt, preferred } = req.body;
+  try {
+    const result = await modifyUIServer(currentHtml, prompt, preferred);
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error in /api/ai/modify-ui:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
+app.post('/api/ai/suggestions', async (req, res) => {
+  const { currentHtml, preferred } = req.body;
+  try {
+    const result = await generateDesignSuggestionsServer(currentHtml, preferred);
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error in /api/ai/suggestions:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
 
 // API route to create a checkout session
 app.post('/api/stripe/create-checkout-session', async (req, res) => {

@@ -486,6 +486,7 @@ const App: React.FC = () => {
   const [isAdminLoading, setIsAdminLoading] = useState(false);
   const [selectedAdminUser, setSelectedAdminUser] = useState<UserProfile | null>(null);
   const [preferredApiProvider, setPreferredApiProvider] = useState<'gemini' | 'openrouter'>(getPreferredProvider);
+  const [adminSortBy, setAdminSortBy] = useState<'active' | 'newest'>('active');
 
   const handleToggleApiProvider = (provider: 'gemini' | 'openrouter') => {
     setPreferredApiProvider(provider);
@@ -504,6 +505,12 @@ const App: React.FC = () => {
       } catch (err) {
         handleFirestoreError(err, OperationType.GET, 'users');
       }
+      // Sort users by registration date (newest first)
+      usersList.sort((a, b) => {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeB - timeA;
+      });
       setAdminUsers(usersList);
 
       let projectsList: Project[] = [];
@@ -1823,6 +1830,19 @@ const App: React.FC = () => {
     // 1. Calculations
     const totalUsers = adminUsers.length;
     
+    // Sort users dynamically
+    const sortedAdminUsers = [...adminUsers].sort((a, b) => {
+      if (adminSortBy === 'active') {
+        const timeA = a.lastLoginAt ? new Date(a.lastLoginAt).getTime() : (a.createdAt ? new Date(a.createdAt).getTime() : 0);
+        const timeB = b.lastLoginAt ? new Date(b.lastLoginAt).getTime() : (b.createdAt ? new Date(b.createdAt).getTime() : 0);
+        return timeB - timeA;
+      } else {
+        const timeA = a.createdAt ? new Date(a.createdAt).getTime() : 0;
+        const timeB = b.createdAt ? new Date(b.createdAt).getTime() : 0;
+        return timeB - timeA;
+      }
+    });
+    
     // Active users: login within 7 days
     const sevenDaysAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
     const activeUsersCount = adminUsers.filter(u => u.lastLoginAt ? new Date(u.lastLoginAt).getTime() > sevenDaysAgo : false).length;
@@ -2232,14 +2252,31 @@ const App: React.FC = () => {
                 
                 {/* Admin Users Table (Col span 12 or 7 if a user is selected) */}
                 <div className={`bg-zinc-950/25 border border-white/5 rounded-3xl p-6 backdrop-blur-md overflow-hidden transition-all duration-300 ${selectedAdminUser ? 'lg:col-span-6' : 'lg:col-span-12'}`}>
-                  <div className="flex items-center justify-between mb-6 pb-2 border-b border-white/5">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6 pb-4 border-b border-white/5">
                     <div className="flex items-center gap-2">
                       <Users className="w-5 h-5 text-zinc-400" />
                       <h3 className="text-lg font-bold">User API Usage Records</h3>
                     </div>
-                    <span className="text-xs bg-white/5 px-2.5 py-1 rounded-full text-zinc-400 font-mono">
-                      {adminUsers.length} Users Found
-                    </span>
+                    <div className="flex items-center gap-3 self-end sm:self-auto">
+                      <span className="text-xs text-zinc-400 font-mono">Sort:</span>
+                      <div className="flex bg-white/5 p-0.5 rounded-xl border border-white/5">
+                        <button
+                          onClick={() => setAdminSortBy('active')}
+                          className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${adminSortBy === 'active' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/10' : 'text-zinc-400 hover:text-white'}`}
+                        >
+                          Last Active
+                        </button>
+                        <button
+                          onClick={() => setAdminSortBy('newest')}
+                          className={`px-3 py-1 text-xs font-medium rounded-lg transition-all ${adminSortBy === 'newest' ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/10' : 'text-zinc-400 hover:text-white'}`}
+                        >
+                          Newest
+                        </button>
+                      </div>
+                      <span className="text-xs bg-white/5 px-2.5 py-1 rounded-full text-zinc-400 font-mono">
+                        {adminUsers.length} Users
+                      </span>
+                    </div>
                   </div>
 
                   <div className="overflow-x-auto">
@@ -2254,7 +2291,7 @@ const App: React.FC = () => {
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-white/5">
-                        {adminUsers.map(userItem => {
+                        {sortedAdminUsers.map(userItem => {
                           const stats = userStats[userItem.uid] || { projectsCount: 0, cost: 0, totalTokens: 0, chatCost: 0, chatTokens: 0 };
                           const isActivePro = userItem.subscription?.status === 'active' || userItem.email === 'thedesignai3@gmail.com';
                           const isCurrentlySelected = selectedAdminUser?.uid === userItem.uid;
@@ -2280,6 +2317,11 @@ const App: React.FC = () => {
                                     <span className="text-zinc-500 text-xs font-mono truncate">
                                       {userItem.email}
                                     </span>
+                                    {userItem.lastLoginAt && (
+                                      <span className="text-[10px] text-zinc-400 font-mono mt-0.5">
+                                        Active: {new Date(userItem.lastLoginAt).toLocaleDateString()} {new Date(userItem.lastLoginAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: false })}
+                                      </span>
+                                    )}
                                   </div>
                                 </div>
                               </td>
