@@ -1972,34 +1972,12 @@ const App: React.FC = () => {
           </div>
           
           <div className="flex items-center gap-3">
-            {/* Preferred API Provider Toggle Control */}
+            {/* Preferred API Provider Badge */}
             <div className="hidden sm:flex items-center gap-2 bg-zinc-950/60 border border-white/5 rounded-full px-3 py-1 mr-1">
-              <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Preferred API:</span>
-              <div className="flex items-center bg-black/60 border border-white/10 rounded-full p-0.5 gap-0.5">
-                <button
-                  type="button"
-                  onClick={() => handleToggleApiProvider('gemini')}
-                  className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase transition-all duration-200 flex items-center gap-1 ${
-                    preferredApiProvider === 'gemini'
-                      ? 'bg-emerald-500 text-black'
-                      : 'text-zinc-400 hover:text-indigo-200'
-                  }`}
-                >
-                  <Sparkles className="w-2.5 h-2.5" />
-                  <span>Gemini</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleToggleApiProvider('openrouter')}
-                  className={`px-2.5 py-0.5 rounded-full text-[9px] font-bold tracking-wider uppercase transition-all duration-200 flex items-center gap-1 ${
-                    preferredApiProvider === 'openrouter'
-                      ? 'bg-purple-600 text-white'
-                      : 'text-zinc-400 hover:text-indigo-200'
-                  }`}
-                >
-                  <Activity className="w-2.5 h-2.5" />
-                  <span>OpenRouter</span>
-                </button>
+              <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest">Powered By:</span>
+              <div className="flex items-center bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-full px-2.5 py-0.5 gap-1 text-[9px] font-bold tracking-wider uppercase">
+                <Sparkles className="w-2.5 h-2.5 text-emerald-400" />
+                <span>Gemini API</span>
               </div>
             </div>
 
@@ -2047,31 +2025,11 @@ const App: React.FC = () => {
 
                 <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto shrink-0 z-10">
                   <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-widest text-center sm:text-left">Selected Core Gateway:</span>
-                  <div className="flex bg-black/60 border border-white/10 rounded-full p-1 gap-1">
-                    <button
-                      type="button"
-                      onClick={() => handleToggleApiProvider('gemini')}
-                      className={`flex-1 sm:flex-initial px-5 py-2 rounded-full text-[11px] font-bold tracking-wider uppercase transition-all duration-300 flex items-center justify-center gap-2 ${
-                        preferredApiProvider === 'gemini'
-                          ? 'bg-emerald-500 text-black shadow-lg shadow-emerald-500/25 scale-[1.02]'
-                          : 'text-zinc-400 hover:text-white hover:bg-white/5'
-                      }`}
-                    >
+                  <div className="flex bg-black/60 border border-white/10 rounded-full p-1">
+                    <div className="flex-1 sm:flex-initial px-5 py-2 rounded-full text-[11px] font-bold tracking-wider uppercase flex items-center justify-center gap-2 bg-emerald-500 text-black shadow-lg shadow-emerald-500/25">
                       <Sparkles className="w-3.5 h-3.5" />
-                      <span>Gemini API (Primary)</span>
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => handleToggleApiProvider('openrouter')}
-                      className={`flex-1 sm:flex-initial px-5 py-2 rounded-full text-[11px] font-bold tracking-wider uppercase transition-all duration-300 flex items-center justify-center gap-2 ${
-                        preferredApiProvider === 'openrouter'
-                          ? 'bg-purple-600 text-white shadow-lg shadow-purple-600/25 scale-[1.02]'
-                          : 'text-zinc-400 hover:text-white hover:bg-white/5'
-                      }`}
-                    >
-                      <Activity className="w-3.5 h-3.5" />
-                      <span>OpenRouter (Primary)</span>
-                    </button>
+                      <span>Gemini API (Active)</span>
+                    </div>
                   </div>
                 </div>
               </div>

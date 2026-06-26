@@ -70,9 +70,16 @@ export async function generateFollowUpQuestionsServer(prompt: string, preferred:
     if (!apiKey) {
       throw new Error("GEMINI_API_KEY is not configured on the server.");
     }
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ 
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
     const response: GenerateContentResponse = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-3.5-flash",
       contents: `User prompt: ${prompt}`,
       config: {
         systemInstruction,
@@ -104,29 +111,11 @@ export async function generateFollowUpQuestionsServer(prompt: string, preferred:
     };
   };
 
-  const runOpenRouter = async () => {
-    const { text, usage } = await callOpenRouter(systemInstruction, `User prompt: ${prompt}`, true);
-    const cleaned = cleanJsonString(text);
-    return {
-      data: JSON.parse(cleaned) as string[],
-      usage
-    };
-  };
-
-  if (preferred === "openrouter") {
-    try {
-      return await runOpenRouter();
-    } catch (error) {
-      console.warn("Preferred OpenRouter API failed, attempting Gemini fallback...", error);
-      return await runGemini();
-    }
-  } else {
-    try {
-      return await runGemini();
-    } catch (error) {
-      console.warn("Preferred Gemini API failed, attempting OpenRouter fallback...", error);
-      return await runOpenRouter();
-    }
+  try {
+    return await runGemini();
+  } catch (error) {
+    console.error("Gemini API error in generateFollowUpQuestionsServer:", error);
+    throw error;
   }
 }
 
@@ -177,9 +166,16 @@ export async function generateUIVariantsServer(
     if (!apiKey) {
       throw new Error("GEMINI_API_KEY is not configured on the server.");
     }
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ 
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
     const response: GenerateContentResponse = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-3.5-flash",
       contents: [promptContent],
       config: {
         systemInstruction,
@@ -223,36 +219,11 @@ export async function generateUIVariantsServer(
     };
   };
 
-  const runOpenRouter = async () => {
-    const { text, usage } = await callOpenRouter(systemInstruction, promptContent, true);
-    const cleaned = cleanJsonString(text);
-    const parsedData = JSON.parse(cleaned);
-    const rawVariants = Array.isArray(parsedData) ? parsedData : (parsedData.variants || parsedData.data || []);
-    const variants = rawVariants.map((v: any, i: number) => ({
-      ...v,
-      id: `variant-${Date.now()}-${i}`
-    }));
-
-    return {
-      data: variants as UIVariant[],
-      usage
-    };
-  };
-
-  if (preferred === "openrouter") {
-    try {
-      return await runOpenRouter();
-    } catch (error) {
-      console.warn("Preferred OpenRouter API failed, attempting Gemini fallback...", error);
-      return await runGemini();
-    }
-  } else {
-    try {
-      return await runGemini();
-    } catch (error) {
-      console.warn("Preferred Gemini API failed, attempting OpenRouter fallback...", error);
-      return await runOpenRouter();
-    }
+  try {
+    return await runGemini();
+  } catch (error) {
+    console.error("Gemini API error in generateUIVariantsServer:", error);
+    throw error;
   }
 }
 
@@ -282,9 +253,16 @@ Rules:
     if (!apiKey) {
       throw new Error("GEMINI_API_KEY is not configured on the server.");
     }
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ 
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
     const response = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-3.5-flash",
       contents: `${sysInstruction}\n\n${promptContent}`,
       config: {
         temperature: 0.2,
@@ -304,30 +282,11 @@ Rules:
     };
   };
 
-  const runOpenRouter = async () => {
-    const { text, usage } = await callOpenRouter(sysInstruction, promptContent, false);
-    let html = text || '';
-    html = html.replace(/```html\n?/g, '').replace(/```\n?/g, '');
-    return {
-      data: html,
-      usage
-    };
-  };
-
-  if (preferred === "openrouter") {
-    try {
-      return await runOpenRouter();
-    } catch (error) {
-      console.warn("Preferred OpenRouter API failed, attempting Gemini fallback...", error);
-      return await runGemini();
-    }
-  } else {
-    try {
-      return await runGemini();
-    } catch (error) {
-      console.warn("Preferred Gemini API failed, attempting OpenRouter fallback...", error);
-      return await runOpenRouter();
-    }
+  try {
+    return await runGemini();
+  } catch (error) {
+    console.error("Gemini API error in modifyUIServer:", error);
+    throw error;
   }
 }
 
@@ -360,9 +319,16 @@ export async function generateDesignSuggestionsServer(
     if (!apiKey) {
       throw new Error("GEMINI_API_KEY is not configured on the server.");
     }
-    const ai = new GoogleGenAI({ apiKey });
+    const ai = new GoogleGenAI({ 
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
     const response: GenerateContentResponse = await ai.models.generateContent({
-      model: "gemini-3-flash-preview",
+      model: "gemini-3.5-flash",
       contents: `Current HTML code:\n\n${currentHtml}`,
       config: {
         systemInstruction,
@@ -404,35 +370,10 @@ export async function generateDesignSuggestionsServer(
     throw new Error("The AI model returned an empty response.");
   };
 
-  const runOpenRouter = async () => {
-    const { text, usage } = await callOpenRouter(systemInstruction, `Current HTML code:\n\n${currentHtml}`, true);
-    const cleaned = cleanJsonString(text);
-    const parsedData = JSON.parse(cleaned);
-    const rawSuggestions = Array.isArray(parsedData) ? parsedData : (parsedData.suggestions || parsedData.data || []);
-    const suggestions = rawSuggestions.map((s: any, i: number) => ({
-      ...s,
-      id: `suggestion-${Date.now()}-${i}`
-    }));
-
-    return {
-      data: suggestions as DesignSuggestion[],
-      usage
-    };
-  };
-
-  if (preferred === "openrouter") {
-    try {
-      return await runOpenRouter();
-    } catch (error) {
-      console.warn("Preferred OpenRouter API failed, attempting Gemini fallback...", error);
-      return await runGemini();
-    }
-  } else {
-    try {
-      return await runGemini();
-    } catch (error) {
-      console.warn("Preferred Gemini API failed, attempting OpenRouter fallback...", error);
-      return await runOpenRouter();
-    }
+  try {
+    return await runGemini();
+  } catch (error) {
+    console.error("Gemini API error in generateDesignSuggestionsServer:", error);
+    throw error;
   }
 }

@@ -8,9 +8,6 @@ export interface GenerationResult<T> {
 const API_BASE_URL = (import.meta as any).env?.VITE_API_URL || "";
 
 export function getPreferredProvider(): "gemini" | "openrouter" {
-  if (typeof window !== "undefined") {
-    return (localStorage.getItem("preferred_api_provider") as "gemini" | "openrouter") || "gemini";
-  }
   return "gemini";
 }
 
