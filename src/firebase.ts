@@ -4,7 +4,16 @@ import { getFirestore, doc, setDoc, getDoc, collection, addDoc, query, where, ge
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase SDK
-const customAuthDomain = (import.meta as any).env?.VITE_FIREBASE_AUTH_DOMAIN;
+let customAuthDomain = (import.meta as any).env?.VITE_FIREBASE_AUTH_DOMAIN || "";
+if (customAuthDomain) {
+  // Strip protocol (http:// or https://)
+  customAuthDomain = customAuthDomain.replace(/^https?:\/\//i, '');
+  // Strip trailing slash or path elements
+  customAuthDomain = customAuthDomain.split('/')[0];
+  // Trim whitespaces
+  customAuthDomain = customAuthDomain.trim();
+}
+
 const config = {
   ...firebaseConfig,
   ...(customAuthDomain ? { authDomain: customAuthDomain } : {})
