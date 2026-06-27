@@ -28,7 +28,7 @@ try {
   const isConfigValid = firebaseConfig && firebaseConfig.apiKey && firebaseConfig.apiKey !== '';
   if (isConfigValid) {
     app = getApps().length === 0 ? initializeApp(config) : getApp();
-    db = getFirestore(app, firebaseConfig.firestoreDatabaseId || '(default)');
+    db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId || '(default)');
     auth = getAuth(app);
     googleProvider = new GoogleAuthProvider();
   } else {
