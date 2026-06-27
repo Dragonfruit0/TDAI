@@ -1298,8 +1298,7 @@ const App: React.FC = () => {
               </div>
             </div>
           </div>
-
-          {/* Bento-grid image reference uploader */}
+          {/* Bento-grid image reference uploader hidden for now
           <div className="w-full grid grid-cols-1 md:grid-cols-3 gap-6">
             <div className="md:col-span-2 bg-[#0d0d0d]/80 backdrop-blur-2xl border border-white/10 rounded-2xl p-6 text-left flex flex-col justify-between min-h-[140px] relative overflow-hidden group/card hover:border-white/20 transition-colors">
               <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 via-transparent to-transparent opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-none" />
@@ -1375,6 +1374,7 @@ const App: React.FC = () => {
               )}
             </div>
           </div>
+          */}
         </motion.form>
       </main>
     </div>
