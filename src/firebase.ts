@@ -1,6 +1,6 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { getFirestore, doc, setDoc, getDoc, collection, addDoc, query, where, getDocs, orderBy } from 'firebase/firestore';
+import { getFirestore, initializeFirestore, doc, setDoc, getDoc, collection, addDoc, query, where, getDocs, orderBy } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 // Initialize Firebase SDK
@@ -38,7 +38,16 @@ try {
   if (isConfigValid) {
     app = getApps().length === 0 ? initializeApp(config) : getApp();
     const dbId = (import.meta as any).env?.VITE_FIREBASE_FIRESTORE_DATABASE_ID || (firebaseConfig as any).firestoreDatabaseId || '(default)';
-    db = getFirestore(app, dbId);
+    try {
+      db = initializeFirestore(app, {
+        experimentalForceLongPolling: true,
+        ignoreUndefinedProperties: true,
+      }, dbId);
+      console.log("[Firebase Debug] Initialized Firestore with custom settings on db:", dbId);
+    } catch (e) {
+      console.warn("[Firebase Debug] Failed to call initializeFirestore, falling back to getFirestore:", e);
+      db = getFirestore(app, dbId);
+    }
     auth = getAuth(app);
     googleProvider = new GoogleAuthProvider();
   } else {
