@@ -1,4 +1,4 @@
-import { initializeApp } from 'firebase/app';
+import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
 import { getFirestore, doc, setDoc, getDoc, collection, addDoc, query, where, getDocs, orderBy } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
@@ -19,10 +19,24 @@ const config = {
   ...(customAuthDomain ? { authDomain: customAuthDomain } : {})
 };
 
-const app = initializeApp(config);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
-export const auth = getAuth(app);
-export const googleProvider = new GoogleAuthProvider();
+export let app: any = null;
+export let db: any = null;
+export let auth: any = null;
+export let googleProvider: any = null;
+
+try {
+  const isConfigValid = firebaseConfig && firebaseConfig.apiKey && firebaseConfig.apiKey !== '';
+  if (isConfigValid) {
+    app = getApps().length === 0 ? initializeApp(config) : getApp();
+    db = getFirestore(app, firebaseConfig.firestoreDatabaseId || '(default)');
+    auth = getAuth(app);
+    googleProvider = new GoogleAuthProvider();
+  } else {
+    console.warn("Firebase configuration is missing or empty. Please run Firebase Setup to connect to your real cloud database.");
+  }
+} catch (err) {
+  console.error("Failed to initialize Firebase:", err);
+}
 
 export enum OperationType {
   CREATE = 'create',
