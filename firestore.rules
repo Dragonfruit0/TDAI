@@ -80,7 +80,7 @@ service cloud.firestore {
     // Validate ISO 8601 date string format (YYYY-MM-DDTHH:MM:SS)
     function isValidDateString(dateStr) {
       return dateStr is string &&
-        dateStr.matches("^\\d{4}-\\d{2}-\\d{2}T\\d{2}:\\d{2}:\\d{2}.*Z?$");
+        dateStr.matches("^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}.*$");
     }
 
     // Validate that the document contains only the allowed fields
