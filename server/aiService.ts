@@ -580,6 +580,7 @@ export async function generateSingleUIVariantServer(
     };
 
     const variant = JSON.parse(jsonText.trim());
+    variant.id = `variant-${Date.now()}-${variantIndex}`;
 
     return {
       data: variant as UIVariant,

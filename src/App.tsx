@@ -1057,8 +1057,12 @@ const App: React.FC = () => {
         
         // Call the single-variant generation endpoint
         const result = await generateSingleUIVariant(prompt, [], [], i, referenceImage);
+        const variantData = result.data;
+        if (!variantData.id) {
+          variantData.id = `variant-${Date.now()}-${i}`;
+        }
         
-        accumulatedVariants.push(result.data);
+        accumulatedVariants.push(variantData);
         setGeneratingVariants([...accumulatedVariants]);
         
         if (result.usage) {
