@@ -29,19 +29,34 @@ let firebaseInitialized = false;
 function getFirebaseAdmin() {
   if (!firebaseInitialized) {
     const configPath = path.join(process.cwd(), 'firebase-applet-config.json');
+    let projectId = process.env.FIREBASE_PROJECT_ID || process.env.VITE_FIREBASE_PROJECT_ID;
+    let databaseId = process.env.FIREBASE_FIRESTORE_DATABASE_ID || process.env.VITE_FIREBASE_FIRESTORE_DATABASE_ID || '(default)';
+
     if (fs.existsSync(configPath)) {
       try {
         firebaseConfig = JSON.parse(fs.readFileSync(configPath, 'utf8'));
-        initializeApp({
-          projectId: firebaseConfig.projectId,
-        });
-        adminDb = getFirestore(firebaseConfig.firestoreDatabaseId);
-        firebaseInitialized = true;
+        projectId = projectId || firebaseConfig.projectId;
+        databaseId = firebaseConfig.firestoreDatabaseId || databaseId;
       } catch (err) {
         console.error("Failed to parse firebase-applet-config.json:", err);
       }
+    }
+
+    if (projectId) {
+      try {
+        initializeApp({
+          projectId: projectId,
+        });
+        adminDb = getFirestore(databaseId);
+        firebaseInitialized = true;
+        if (!firebaseConfig) {
+          firebaseConfig = { projectId, firestoreDatabaseId: databaseId };
+        }
+      } catch (err) {
+        console.error("Failed to initialize firebase-admin:", err);
+      }
     } else {
-      console.warn("firebase-applet-config.json is missing! Firebase Admin functions will fail. Using mock user for development.");
+      console.warn("firebase-applet-config.json is missing and no environment variables (FIREBASE_PROJECT_ID) were provided! Firebase Admin functions will fail. Using mock user for development.");
     }
   }
   return { adminDb, firebaseConfig, initialized: firebaseInitialized };

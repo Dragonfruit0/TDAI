@@ -15,8 +15,13 @@ if (customAuthDomain) {
 }
 
 const config = {
-  ...firebaseConfig,
-  ...(customAuthDomain ? { authDomain: customAuthDomain } : {})
+  apiKey: (import.meta as any).env?.VITE_FIREBASE_API_KEY || firebaseConfig.apiKey || "",
+  authDomain: (import.meta as any).env?.VITE_FIREBASE_AUTH_DOMAIN || firebaseConfig.authDomain || customAuthDomain || "",
+  projectId: (import.meta as any).env?.VITE_FIREBASE_PROJECT_ID || firebaseConfig.projectId || "",
+  storageBucket: (import.meta as any).env?.VITE_FIREBASE_STORAGE_BUCKET || (firebaseConfig as any).storageBucket || "",
+  messagingSenderId: (import.meta as any).env?.VITE_FIREBASE_MESSAGING_SENDER_ID || (firebaseConfig as any).messagingSenderId || "",
+  appId: (import.meta as any).env?.VITE_FIREBASE_APP_ID || (firebaseConfig as any).appId || "",
+  measurementId: (import.meta as any).env?.VITE_FIREBASE_MEASUREMENT_ID || (firebaseConfig as any).measurementId || ""
 };
 
 export let app: any = null;
@@ -25,14 +30,19 @@ export let auth: any = null;
 export let googleProvider: any = null;
 
 try {
-  const isConfigValid = firebaseConfig && firebaseConfig.apiKey && firebaseConfig.apiKey !== '';
+  const isConfigValid = config.apiKey && config.apiKey !== 'mock-api-key' && config.apiKey !== '';
+  console.log("[Firebase Debug] Initializing Firebase with config (masked apiKey):", {
+    ...config,
+    apiKey: config.apiKey ? `${config.apiKey.substring(0, 6)}...${config.apiKey.slice(-6)}` : "MISSING"
+  }, "isConfigValid:", !!isConfigValid);
   if (isConfigValid) {
     app = getApps().length === 0 ? initializeApp(config) : getApp();
-    db = getFirestore(app, (firebaseConfig as any).firestoreDatabaseId || '(default)');
+    const dbId = (import.meta as any).env?.VITE_FIREBASE_FIRESTORE_DATABASE_ID || (firebaseConfig as any).firestoreDatabaseId || '(default)';
+    db = getFirestore(app, dbId);
     auth = getAuth(app);
     googleProvider = new GoogleAuthProvider();
   } else {
-    console.warn("Firebase configuration is missing or empty. Please run Firebase Setup to connect to your real cloud database.");
+    console.warn("Firebase configuration is missing or empty. Please run Firebase Setup or configure VITE_FIREBASE_* environment variables to connect to your real cloud database.");
   }
 } catch (err) {
   console.error("Failed to initialize Firebase:", err);
