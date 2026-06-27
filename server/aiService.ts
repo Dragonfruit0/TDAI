@@ -1,5 +1,5 @@
 import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
-import { UIVariant, UsageMetadata, DesignSuggestion } from "../src/types.ts";
+import { UIVariant, UsageMetadata, DesignSuggestion, ColorPalette } from "../src/types.ts";
 
 function cleanJsonString(str: string): string {
   let cleaned = str.trim();
@@ -123,7 +123,8 @@ export async function generateUIVariantsServer(
   prompt: string,
   questions: string[],
   answers: string[],
-  preferred: "gemini" | "openrouter"
+  preferred: "gemini" | "openrouter",
+  referenceImage?: { base64: string; mimeType: string } | null
 ): Promise<{ data: UIVariant[]; usage: UsageMetadata }> {
   const apiKey = process.env.GEMINI_API_KEY;
   const systemInstruction = `
@@ -156,11 +157,21 @@ export async function generateUIVariantsServer(
     - 'description': A one-sentence explanation describing the material logic and design persona.
   `.trim();
 
-  const contents: any[] = [`Generate 3 design variations for: ${prompt}`];
+  const textParts: string[] = [`Generate 3 design variations for: ${prompt}`];
   if (answers.length > 0 && questions.length > 0) {
-    contents.push(`\n\nUser's answers to clarifying questions:\n${questions.map((q, i) => `Q: ${q}\nA: ${answers[i]}`).join('\n\n')}`);
+    textParts.push(`\n\nUser's answers to clarifying questions:\n${questions.map((q, i) => `Q: ${q}\nA: ${answers[i]}`).join('\n\n')}`);
   }
-  const promptContent = contents.join('\n');
+  const promptContent = textParts.join('\n');
+
+  const contents: any[] = [promptContent];
+  if (referenceImage) {
+    contents.push({
+      inlineData: {
+        data: referenceImage.base64,
+        mimeType: referenceImage.mimeType
+      }
+    });
+  }
 
   const runGemini = async () => {
     if (!apiKey) {
@@ -176,7 +187,7 @@ export async function generateUIVariantsServer(
     });
     const response: GenerateContentResponse = await ai.models.generateContent({
       model: "gemini-3.5-flash",
-      contents: [promptContent],
+      contents,
       config: {
         systemInstruction,
         temperature: 1.0,
@@ -457,3 +468,226 @@ export async function generateDesignSuggestionsServer(
     throw error;
   }
 }
+
+export async function generateSingleUIVariantServer(
+  prompt: string,
+  questions: string[],
+  answers: string[],
+  preferred: "gemini" | "openrouter",
+  variantIndex: number,
+  referenceImage?: { base64: string; mimeType: string } | null
+): Promise<{ data: UIVariant; usage: UsageMetadata }> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  
+  const styles = [
+    {
+      name: "Asymmetrical Rectilinear Blockwork",
+      desc: "Heavy black strokes, grid-heavy, primary pigments, thick structural lines, Bauhaus-functionalism vibe."
+    },
+    {
+      name: "Grainy Risograph Layering",
+      desc: "Tactile paper texture, overprinted translucent inks, dithered grain textures, monochromatic depth, raw paper substrate."
+    },
+    {
+      name: "Volumetric Prismatic Diffusion",
+      desc: "Generative morphing gradients, soft-focus diffusion, bioluminescent light sources, spectral chromatic aberration, glassmorphism."
+    }
+  ];
+  
+  const selectedStyle = styles[variantIndex] || styles[0];
+  
+  const systemInstruction = `
+    You are Flash UI, a master UI/UX designer and world-class frontend engineer. 
+    Your mission is to generate ONE RADICAL CONCEPTUAL VARIATION for the user's prompt, strictly adhering to the specified design persona: "${selectedStyle.name}".
+    Description of persona: ${selectedStyle.desc}
+
+    The user might request a UI, a poster, a logo, or any other visual layout. Adapt your HTML/Tailwind output to perfectly suit the requested medium.
+
+    **STRICT IP SAFEGUARD:**
+    - Never use names of artists, movies, or brands.
+    - Instead, describe the "Physicality" and "Material Logic" of the UI.
+
+    **VISUAL EXECUTION RULES:**
+    1. **Materiality**: Use physical metaphors to drive every CSS choice. (e.g., if "Risograph", use grain effects like \`feTurbulence\` in SVG filters and \`mix-blend-mode: multiply\` for ink layering; if "Prismatic", use glassmorphism, caustic refraction, and morphing fluid gradients).
+    2. **Typography**: Use high-quality web fonts (Inter, Geist, or system-ui). Pair a bold sans-serif with a refined monospace for data/labels.
+    3. **Motion**: Include subtle, high-performance CSS animations (hover transitions, entry reveals, smooth staggered animations).
+    4. **Layout**: Be bold with negative space and hierarchy. **AVOID GENERIC CARDS.** Use asymmetrical grids, suspended kinetic mobile elements, or fluid rectilinear structures.
+    5. **Tailwind Only**: Output clean, accessible Tailwind CSS. For posters/logos, use absolute positioning, CSS grid, or SVG elements inline within the HTML. Ensure components are responsive.
+
+    **OUTPUT FORMAT:**
+    Return a JSON object with:
+    - 'label': A unique design persona name based on the style "${selectedStyle.name}" and a NEW physical metaphor.
+    - 'html': The raw HTML string with Tailwind classes.
+    - 'description': A one-sentence explanation describing the material logic and design persona.
+  `.trim();
+
+  const textParts: string[] = [`Generate a single design variation strictly in the style "${selectedStyle.name}" for: ${prompt}`];
+  if (answers.length > 0 && questions.length > 0) {
+    textParts.push(`\n\nUser's answers to clarifying questions:\n${questions.map((q, i) => `Q: ${q}\nA: ${answers[i]}`).join('\n\n')}`);
+  }
+  const promptContent = textParts.join('\n');
+
+  const contents: any[] = [promptContent];
+  if (referenceImage) {
+    contents.push({
+      inlineData: {
+        data: referenceImage.base64,
+        mimeType: referenceImage.mimeType
+      }
+    });
+  }
+
+  const runGemini = async () => {
+    if (!apiKey) {
+      throw new Error("GEMINI_API_KEY is not configured on the server.");
+    }
+    const ai = new GoogleGenAI({ 
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
+    const response: GenerateContentResponse = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents,
+      config: {
+        systemInstruction,
+        temperature: 1.0,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            label: { type: Type.STRING },
+            html: { type: Type.STRING },
+            description: { type: Type.STRING }
+          },
+          required: ["label", "html", "description"]
+        }
+      }
+    });
+
+    const jsonText = response.text;
+    if (!jsonText) {
+      throw new Error("The AI model returned an empty response.");
+    }
+
+    const usage: UsageMetadata = {
+      promptTokenCount: response.usageMetadata?.promptTokenCount || 0,
+      candidatesTokenCount: response.usageMetadata?.candidatesTokenCount || 0,
+      totalTokenCount: response.usageMetadata?.totalTokenCount || 0
+    };
+
+    const variant = JSON.parse(jsonText.trim());
+
+    return {
+      data: variant as UIVariant,
+      usage
+    };
+  };
+
+  try {
+    return await runGemini();
+  } catch (error) {
+    console.error("Gemini API error in generateSingleUIVariantServer:", error);
+    throw error;
+  }
+}
+
+export async function generatePaletteServer(currentHtml: string): Promise<{ data: ColorPalette[]; usage: UsageMetadata }> {
+  const apiKey = process.env.GEMINI_API_KEY;
+  const systemInstruction = `
+    You are an expert color theorist and design system architect.
+    Your task is to analyze the provided HTML/Tailwind code, assess its current mood/theme, and propose exactly 3 curated, beautiful color palette options that would elevate or redefine the design.
+    
+    Each of the 3 palette options must consist of:
+    - 'name': A creative name for the palette (e.g., "Neo-Retro Acid", "Muted Linen", "Nordic Slate").
+    - 'colors': An array of exactly 5 colors matching these roles:
+      1. 'primary': The main dominant color (usually brand/focal color).
+      2. 'accent': A vibrant accent color (for key active elements, badges, highlights).
+      3. 'background': The main canvas color (dark, light, or textured).
+      4. 'surface': The background of cards/panels (slightly lighter/darker than background).
+      5. 'text': The body/heading text color for high-contrast legibility.
+
+    For each color, provide:
+    - 'role': One of: "primary", "accent", "background", "surface", "text"
+    - 'hex': The precise CSS color hex code (e.g., "#101012").
+
+    Ensure color contrast standards are met between background/surface and text/primary.
+    Return a JSON array containing exactly 3 palette objects.
+  `.trim();
+
+  const runGemini = async () => {
+    if (!apiKey) {
+      throw new Error("GEMINI_API_KEY is not configured on the server.");
+    }
+    const ai = new GoogleGenAI({ 
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        }
+      }
+    });
+    const response: GenerateContentResponse = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: `Current UI HTML:\n\n${currentHtml}`,
+      config: {
+        systemInstruction,
+        temperature: 0.7,
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.ARRAY,
+          items: {
+            type: Type.OBJECT,
+            properties: {
+              name: { type: Type.STRING },
+              colors: {
+                type: Type.ARRAY,
+                items: {
+                  type: Type.OBJECT,
+                  properties: {
+                    role: { 
+                      type: Type.STRING,
+                      enum: ["primary", "accent", "background", "surface", "text"]
+                    },
+                    hex: { type: Type.STRING }
+                  },
+                  required: ["role", "hex"]
+                }
+              }
+            },
+            required: ["name", "colors"]
+          }
+        }
+      }
+    });
+
+    const jsonText = response.text;
+    if (!jsonText) {
+      throw new Error("The AI model returned an empty response.");
+    }
+
+    const usage: UsageMetadata = {
+      promptTokenCount: response.usageMetadata?.promptTokenCount || 0,
+      candidatesTokenCount: response.usageMetadata?.candidatesTokenCount || 0,
+      totalTokenCount: response.usageMetadata?.totalTokenCount || 0
+    };
+
+    const palettes = JSON.parse(jsonText.trim());
+
+    return {
+      data: palettes as ColorPalette[],
+      usage
+    };
+  };
+
+  try {
+    return await runGemini();
+  } catch (error) {
+    console.error("Gemini API error in generatePaletteServer:", error);
+    throw error;
+  }
+}
+

@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { ArrowRight, ChevronLeft, ChevronRight, Sparkles, Loader2, X, User as UserIcon, LogOut, History, Download, MessageSquare, Send, LayoutGrid, ShieldAlert, Lock, CreditCard, Users, TrendingUp, Coins, Activity, Eye, RefreshCw, Trash2, ArrowUpRight, CheckCircle, AlignLeft, AlignCenter, AlignRight, Palette, Sliders, Type, Grid, Check, Paintbrush, Circle, Layers, SlidersHorizontal, MousePointerClick, CheckSquare } from 'lucide-react';
+import { ArrowRight, ChevronLeft, ChevronRight, Sparkles, Loader2, X, User as UserIcon, LogOut, History, Download, MessageSquare, Send, LayoutGrid, ShieldAlert, Lock, CreditCard, Users, TrendingUp, Coins, Activity, Eye, RefreshCw, Trash2, ArrowUpRight, CheckCircle, AlignLeft, AlignCenter, AlignRight, Palette, Sliders, Type, Grid, Check, Paintbrush, Circle, Layers, SlidersHorizontal, MousePointerClick, CheckSquare, Undo2, Redo2, Paperclip, Plus } from 'lucide-react';
 import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
-import { AppView, UIVariant, UserProfile, Project, ChatMessage, UsageMetadata, DesignSuggestion, SavedDesign } from './types.ts';
-import { generateFollowUpQuestions, generateUIVariants, modifyUI, generateDesignSuggestions, getPreferredProvider } from './services/geminiService.ts';
+import { AppView, UIVariant, UserProfile, Project, ChatMessage, UsageMetadata, DesignSuggestion, SavedDesign, ColorPalette, ProjectVersion } from './types.ts';
+import { generateFollowUpQuestions, generateUIVariants, modifyUI, generateDesignSuggestions, getPreferredProvider, generateSingleUIVariant, generatePalette } from './services/geminiService.ts';
 import { UIPreview } from './components/UIPreview.tsx';
 import { OnboardingTutorial } from './components/OnboardingTutorial.tsx';
 import DottedGlowBackground from './components/DottedGlowBackground.tsx';
@@ -200,6 +200,74 @@ const ColorWheel: React.FC<{
         <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-4 h-4 bg-black border-2 border-white rounded-full pointer-events-none shadow" />
       </div>
       <span className="text-[9px] text-zinc-500 mt-1 uppercase font-mono tracking-wider">Drag to select dynamic color</span>
+    </div>
+  );
+};
+
+// Feature 4: Standalone Version Item component to prevent losing focus during name edits
+const VersionItem = ({ 
+  version, 
+  onRestore, 
+  onUpdateName 
+}: { 
+  version: any, 
+  onRestore: (html: string, name: string) => void, 
+  onUpdateName: (id: string, name: string) => any,
+  key?: any
+}) => {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editVal, setEditVal] = useState(version.name);
+  
+  return (
+    <div className="bg-white/[0.02] border border-white/5 hover:border-white/10 rounded-xl p-3.5 flex flex-col gap-2.5 transition-colors relative group/version">
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1">
+          {isEditing ? (
+            <input
+              type="text"
+              value={editVal}
+              onChange={(e) => setEditVal(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  onUpdateName(version.id, editVal);
+                  setIsEditing(false);
+                } else if (e.key === 'Escape') {
+                  setIsEditing(false);
+                }
+              }}
+              className="bg-black/50 border border-emerald-500/50 rounded px-2 py-0.5 text-xs text-white w-full focus:outline-none font-sans"
+              autoFocus
+              onBlur={() => {
+                onUpdateName(version.id, editVal);
+                setIsEditing(false);
+              }}
+            />
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <span className="text-xs font-bold text-zinc-200 line-clamp-1">{version.name}</span>
+              <button 
+                type="button"
+                onClick={() => { setEditVal(version.name); setIsEditing(true); }}
+                className="text-zinc-500 hover:text-white transition-colors opacity-0 group-hover/version:opacity-100 shrink-0"
+                title="Rename version"
+              >
+                <Plus className="w-3 h-3 rotate-45 transform text-zinc-400" />
+              </button>
+            </div>
+          )}
+          <p className="text-[10px] text-zinc-500 mt-0.5">
+            {new Date(version.createdAt).toLocaleTimeString()} — {new Date(version.createdAt).toLocaleDateString()}
+          </p>
+        </div>
+      </div>
+
+      <button
+        type="button"
+        onClick={() => onRestore(version.html, version.name)}
+        className="w-full bg-white/5 hover:bg-white/10 text-white border border-white/10 py-1.5 rounded-lg text-[10px] font-bold tracking-wide uppercase transition-colors cursor-pointer"
+      >
+        Restore Layout
+      </button>
     </div>
   );
 };
@@ -576,14 +644,233 @@ const App: React.FC = () => {
 
   // Builder state
   const [isManualEditing, setIsManualEditing] = useState(false);
-  const [sidebarTab, setSidebarTab] = useState<'chat' | 'editor'>('chat');
+  const [sidebarTab, setSidebarTab] = useState<'chat' | 'editor' | 'palette' | 'history'>('chat');
   const [selectedElement, setSelectedElement] = useState<{ 
     tagName: string, 
     classes: string, 
     textContent?: string,
     rect?: { top: number, left: number, width: number, height: number } 
   } | null>(null);
-  const [builderHtml, setBuilderHtml] = useState('');
+
+  // Feature 1: Undo/Redo History Stack
+  const [htmlHistory, setHtmlHistory] = useState<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState(-1);
+  const builderHtml = historyIndex >= 0 ? htmlHistory[historyIndex] : '';
+
+  const setBuilderHtml = (newHtml: string, skipHistory = false) => {
+    if (skipHistory) {
+      setHtmlHistory(prev => {
+        const next = [...prev.slice(0, historyIndex + 1)];
+        if (next.length === 0) {
+          next.push(newHtml);
+        } else {
+          next[Math.max(historyIndex, 0)] = newHtml;
+        }
+        return next;
+      });
+      if (historyIndex < 0) {
+        setHistoryIndex(0);
+      }
+      return;
+    }
+    setHtmlHistory(prev => {
+      const next = [...prev.slice(0, historyIndex + 1), newHtml];
+      return next.slice(-50); // cap at 50 entries
+    });
+    setHistoryIndex(prev => {
+      const nextIndex = prev + 1;
+      return Math.min(nextIndex, 49);
+    });
+  };
+
+  const resetBuilderHtml = (initialHtml: string) => {
+    setHtmlHistory([initialHtml]);
+    setHistoryIndex(0);
+  };
+
+  const canUndo = historyIndex > 0;
+  const canRedo = historyIndex < htmlHistory.length - 1;
+
+  const undo = () => {
+    if (!canUndo) return;
+    setHistoryIndex(prev => prev - 1);
+  };
+
+  const redo = () => {
+    if (!canRedo) return;
+    setHistoryIndex(prev => prev + 1);
+  };
+
+  // Feature 2: Reference Image Upload State
+  const [referenceImage, setReferenceImage] = useState<{ base64: string, mimeType: string } | null>(null);
+  const [isDragging, setIsDragging] = useState(false);
+
+  const handleImageUpload = (file: File) => {
+    if (!file.type.startsWith('image/')) {
+      alert('Please upload an image file.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const base64 = e.target?.result as string;
+      if (base64) {
+        setReferenceImage({
+          base64,
+          mimeType: file.type
+        });
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Feature 3: AI Color Palette Generator Panel State
+  const [palettes, setPalettes] = useState<ColorPalette[]>([
+    {
+      id: 'default-emerald',
+      name: 'Emerald Forest',
+      swatches: [
+        { role: 'primary', hex: '#10b981', tailwindClass: 'bg-emerald-500' },
+        { role: 'secondary', hex: '#064e3b', tailwindClass: 'bg-emerald-900' },
+        { role: 'background', hex: '#022c22', tailwindClass: 'bg-emerald-950' },
+        { role: 'text', hex: '#f0fdf4', tailwindClass: 'text-emerald-50' },
+        { role: 'accent', hex: '#34d399', tailwindClass: 'bg-emerald-400' }
+      ]
+    },
+    {
+      id: 'cyberpunk',
+      name: 'Neo Cyberpunk',
+      swatches: [
+        { role: 'primary', hex: '#ec4899', tailwindClass: 'bg-pink-500' },
+        { role: 'secondary', hex: '#3b82f6', tailwindClass: 'bg-blue-500' },
+        { role: 'background', hex: '#0f172a', tailwindClass: 'bg-slate-900' },
+        { role: 'text', hex: '#f8fafc', tailwindClass: 'text-slate-50' },
+        { role: 'accent', hex: '#a855f7', tailwindClass: 'bg-purple-500' }
+      ]
+    },
+    {
+      id: 'nordic',
+      name: 'Nordic Frost',
+      swatches: [
+        { role: 'primary', hex: '#0ea5e9', tailwindClass: 'bg-sky-500' },
+        { role: 'secondary', hex: '#475569', tailwindClass: 'bg-slate-600' },
+        { role: 'background', hex: '#f1f5f9', tailwindClass: 'bg-slate-100' },
+        { role: 'text', hex: '#0f172a', tailwindClass: 'text-slate-900' },
+        { role: 'accent', hex: '#0284c7', tailwindClass: 'bg-sky-600' }
+      ]
+    }
+  ]);
+  const [isGeneratingPalette, setIsGeneratingPalette] = useState(false);
+
+  // Feature 4: Version History & Auto-Saves State
+  const [currentProjectId, setCurrentProjectId] = useState<string | null>(null);
+  const [versionHistory, setVersionHistory] = useState<ProjectVersion[]>([]);
+  const [sessionSaveCount, setSessionSaveCount] = useState(1);
+  const autoSaveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  const triggerAutoSave = (html: string, changeName: string) => {
+    if (autoSaveTimeoutRef.current) {
+      clearTimeout(autoSaveTimeoutRef.current);
+    }
+    autoSaveTimeoutRef.current = setTimeout(async () => {
+      const versionId = Date.now().toString();
+      const newVersion = {
+        id: versionId,
+        name: changeName,
+        html,
+        createdAt: new Date().toISOString()
+      };
+      setVersionHistory(prev => [newVersion, ...prev]);
+      setSessionSaveCount(prev => prev + 1);
+      
+      if (user && currentProjectId) {
+        try {
+          const versionData = {
+            name: changeName,
+            html,
+            createdAt: new Date().toISOString()
+          };
+          await addDoc(collection(db, `projects/${currentProjectId}/versions`), versionData);
+          console.log("Auto-save successfully saved to Firebase.");
+        } catch (err) {
+          console.error("Auto-save failed to save to Firebase:", err);
+        }
+      }
+    }, 2000);
+  };
+
+  const fetchProjectVersions = async (pId: string) => {
+    if (!user) return;
+    try {
+      const q = query(collection(db, `projects/${pId}/versions`), orderBy('createdAt', 'desc'));
+      const querySnapshot = await getDocs(q);
+      const versions: any[] = [];
+      querySnapshot.forEach((doc) => {
+        versions.push({ id: doc.id, ...doc.data() });
+      });
+      setVersionHistory(versions);
+      setSessionSaveCount(versions.length + 1);
+    } catch (err) {
+      console.error("Error fetching project versions:", err);
+    }
+  };
+
+  const updateVersionName = async (versionId: string, newName: string) => {
+    setVersionHistory(prev => prev.map(v => v.id === versionId ? { ...v, name: newName } : v));
+    if (user && currentProjectId) {
+      try {
+        const docRef = doc(db, `projects/${currentProjectId}/versions`, versionId);
+        await setDoc(docRef, { name: newName }, { merge: true });
+        console.log("Version name updated in Firestore.");
+      } catch (err) {
+        console.error("Error updating version name in Firestore:", err);
+      }
+    }
+  };
+
+  // Keyboard shortcut listener for undo/redo
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (view !== AppView.BUILDER) return;
+      const active = document.activeElement;
+      if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.getAttribute('contenteditable') === 'true')) {
+        return;
+      }
+      const isCtrl = e.ctrlKey || e.metaKey;
+      if (isCtrl) {
+        if (e.key.toLowerCase() === 'z') {
+          if (e.shiftKey) {
+            e.preventDefault();
+            redo();
+          } else {
+            e.preventDefault();
+            undo();
+          }
+        } else if (e.key.toLowerCase() === 'y') {
+          e.preventDefault();
+          redo();
+        }
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [view, historyIndex, htmlHistory.length]);
+
+  // Clean up auto-save on unmount
+  useEffect(() => {
+    return () => {
+      if (autoSaveTimeoutRef.current) {
+        clearTimeout(autoSaveTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  // Feature 5: Progressive Generating variants
+  const [generatingVariants, setGeneratingVariants] = useState<UIVariant[]>([]);
+  const [generatingStep, setGeneratingStep] = useState<string>('Analyzing design parameters...');
+
+  // Feature 6: In-App Error Banner State
+  const [generationError, setGenerationError] = useState<string | null>(null);
+
   const [chatMessages, setChatMessages] = useState<ChatMessage[]>([]);
   const [chatInput, setChatInput] = useState('');
   const [isChatGenerating, setIsChatGenerating] = useState(false);
@@ -662,6 +949,7 @@ const App: React.FC = () => {
 
       if (event.data?.type === 'UI_EDITED' && event.data.html) {
         setBuilderHtml(event.data.html);
+        triggerAutoSave(event.data.html, `Manual Tweak #${sessionSaveCount}`);
       } else if (event.data?.type === 'ELEMENT_SELECTED') {
         setSelectedElement({
           tagName: event.data.tagName,
@@ -750,16 +1038,47 @@ const App: React.FC = () => {
     
     setView(AppView.GENERATING);
     setIsGeneratingUI(true);
+    setGenerationError(null);
+    setGeneratingVariants([]);
+    
+    const accumulatedVariants: UIVariant[] = [];
+    let totalPromptTokenCount = 0;
+    let totalCandidatesTokenCount = 0;
+    
     try {
-      const result = await generateUIVariants(prompt);
-      const generatedVariants = result.data;
-      const usage = result.usage;
-      const cost = calculateCost(usage);
+      const stepNames = [
+        "Analyzing layout variant 1 of 3 (Standard Layout)...",
+        "Synthesizing variant 2 of 3 (Cosmic Slate Layout)...",
+        "Refining variant 3 of 3 (Ultra Minimalist Layout)..."
+      ];
       
-      setVariants(generatedVariants);
+      for (let i = 0; i < 3; i++) {
+        setGeneratingStep(stepNames[i]);
+        
+        // Call the single-variant generation endpoint
+        const result = await generateSingleUIVariant(prompt, [], [], i, referenceImage);
+        
+        accumulatedVariants.push(result.data);
+        setGeneratingVariants([...accumulatedVariants]);
+        
+        if (result.usage) {
+          totalPromptTokenCount += result.usage.promptTokenCount || 0;
+          totalCandidatesTokenCount += result.usage.candidatesTokenCount || 0;
+        }
+      }
+      
+      const finalUsage: UsageMetadata = {
+        promptTokenCount: totalPromptTokenCount,
+        candidatesTokenCount: totalCandidatesTokenCount,
+        totalTokenCount: totalPromptTokenCount + totalCandidatesTokenCount
+      };
+      
+      const finalCost = calculateCost(finalUsage);
+      
+      setVariants(accumulatedVariants);
       setCurrentVariantIndex(0);
-      setCurrentProjectUsage(usage);
-      setCurrentProjectCost(cost);
+      setCurrentProjectUsage(finalUsage);
+      setCurrentProjectCost(finalCost);
       
       if (user) {
         try {
@@ -768,25 +1087,28 @@ const App: React.FC = () => {
             prompt,
             questions: [],
             answers: [],
-            variants: generatedVariants,
+            variants: accumulatedVariants,
             createdAt: new Date().toISOString(),
-            usage,
-            cost
+            usage: finalUsage,
+            cost: finalCost
           };
-          await addDoc(collection(db, 'projects'), projectData);
+          const docRef = await addDoc(collection(db, 'projects'), projectData);
+          setCurrentProjectId(docRef.id);
+          await fetchProjectVersions(docRef.id);
           await refreshLimits(user);
         } catch (dbError) {
           handleFirestoreError(dbError, OperationType.CREATE, 'projects');
         }
       }
-
+      
       setView(AppView.PREVIEW);
-    } catch (error) {
+    } catch (error: any) {
       console.error(error);
-      alert("Failed to generate UI.");
+      setGenerationError(error.message || "Failed to generate UI. Please try again.");
       setView(AppView.LANDING);
     } finally {
       setIsGeneratingUI(false);
+      setGeneratingVariants([]);
     }
   };
 
@@ -889,6 +1211,27 @@ const App: React.FC = () => {
           </h1>
         </motion.div>
 
+        {generationError && (
+          <motion.div 
+            initial={{ opacity: 0, y: -10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="w-full max-w-3xl mb-6 bg-red-500/10 border border-red-500/20 text-red-400 px-6 py-4 rounded-2xl text-sm flex items-start gap-4 text-left shadow-2xl relative z-50"
+          >
+            <ShieldAlert className="w-5 h-5 shrink-0 text-red-400 mt-0.5" />
+            <div className="flex-1">
+              <h4 className="font-bold text-white mb-1">Generation Failed</h4>
+              <p className="text-red-300 text-xs font-light leading-relaxed">{generationError}</p>
+            </div>
+            <button 
+              type="button"
+              onClick={() => setGenerationError(null)} 
+              className="text-zinc-500 hover:text-white transition-colors"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </motion.div>
+        )}
+ 
         <motion.form 
           onSubmit={(e) => {
             e.preventDefault();
@@ -901,7 +1244,7 @@ const App: React.FC = () => {
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.8, delay: 0.3, ease: [0.16, 1, 0.3, 1] }}
-          className="w-full max-w-3xl flex flex-col items-center"
+          className="w-full max-w-3xl flex flex-col items-center gap-6"
         >
           <div className="w-full relative group">
             <div className="absolute -inset-1 bg-gradient-to-r from-purple-600 via-blue-600 to-emerald-600 rounded-2xl blur-md opacity-30 group-hover:opacity-60 transition duration-1000 group-hover:duration-200" />
@@ -955,47 +1298,183 @@ const App: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* Bento-grid image reference uploader */}
+          <div className="w-full grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="md:col-span-2 bg-[#0d0d0d]/80 backdrop-blur-2xl border border-white/10 rounded-2xl p-6 text-left flex flex-col justify-between min-h-[140px] relative overflow-hidden group/card hover:border-white/20 transition-colors">
+              <div className="absolute inset-0 bg-gradient-to-tr from-purple-500/5 via-transparent to-transparent opacity-0 group-hover/card:opacity-100 transition-opacity pointer-events-none" />
+              <div>
+                <h3 className="text-white font-bold text-sm tracking-tight mb-1 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-purple-400" />
+                  <span>Interactive Guidance Mode</span>
+                </h3>
+                <p className="text-zinc-500 text-xs leading-relaxed max-w-md">
+                  Combine a textual prompt description with an optional image reference style. Gemini will extract structure, color layouts, and architectural style to build variant interfaces.
+                </p>
+              </div>
+              <div className="mt-4 flex items-center gap-4">
+                <div className="flex -space-x-2">
+                  <div className="w-6 h-6 rounded-full bg-purple-500 border border-black flex items-center justify-center text-[10px] font-bold">1</div>
+                  <div className="w-6 h-6 rounded-full bg-blue-500 border border-black flex items-center justify-center text-[10px] font-bold">2</div>
+                  <div className="w-6 h-6 rounded-full bg-emerald-500 border border-black flex items-center justify-center text-[10px] font-bold">3</div>
+                </div>
+                <span className="text-[10px] text-zinc-400 font-mono tracking-wider uppercase">Generates 3 distinct layout solutions</span>
+              </div>
+            </div>
+
+            <div 
+              onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={(e) => {
+                e.preventDefault();
+                setIsDragging(false);
+                const file = e.dataTransfer.files?.[0];
+                if (file) handleImageUpload(file);
+              }}
+              className={`relative bg-[#0d0d0d]/80 backdrop-blur-2xl border rounded-2xl p-4 flex flex-col items-center justify-center min-h-[140px] transition-all cursor-pointer ${isDragging ? 'border-emerald-500 bg-emerald-500/5 scale-[0.98]' : referenceImage ? 'border-emerald-500/50' : 'border-white/10 hover:border-white/20'}`}
+              onClick={() => document.getElementById('reference-file-input')?.click()}
+            >
+              <input 
+                id="reference-file-input"
+                type="file" 
+                accept="image/png, image/jpeg, image/jpg"
+                className="hidden" 
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleImageUpload(file);
+                }}
+              />
+              
+              {referenceImage ? (
+                <div className="flex flex-col items-center gap-2 w-full h-full justify-between" onClick={(e) => e.stopPropagation()}>
+                  <div className="relative w-16 h-16 rounded-lg overflow-hidden border border-white/10 shadow-lg">
+                    <img src={referenceImage.base64} alt="Reference Preview" className="w-full h-full object-cover" />
+                    <button 
+                      type="button"
+                      onClick={() => setReferenceImage(null)}
+                      className="absolute top-1 right-1 bg-black/80 hover:bg-black text-white p-1 rounded-full border border-white/10 hover:scale-110 transition-transform"
+                      title="Remove image"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                  <span className="text-[10px] font-mono text-emerald-400 font-bold tracking-wider uppercase flex items-center gap-1">
+                    <CheckCircle className="w-3 h-3 text-emerald-400" /> Image Loaded
+                  </span>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center text-center gap-2">
+                  <div className="w-10 h-10 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center">
+                    <Paperclip className="w-5 h-5 text-zinc-400" />
+                  </div>
+                  <div className="text-xs">
+                    <span className="text-zinc-200 font-bold">Attach reference</span>
+                    <p className="text-zinc-500 text-[10px] mt-0.5">Drag & drop or browse</p>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </motion.form>
       </main>
     </div>
   );
 
-  const renderGenerating = () => (
-    <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center relative overflow-hidden">
-      {/* Logo Header */}
-      <div className="absolute top-0 left-0 right-0 p-6 flex justify-center z-50 animate-pulse">
-        <div className="flex items-center gap-3 bg-white/5 backdrop-blur-xl px-4 py-2 rounded-full border border-white/10">
-          <img src="/tdai_logo.jpeg" alt="Logo" className="w-6 h-6 rounded-lg shadow-2xl" />
-          <span className="font-bold text-sm tracking-tighter">TheDesignAI</span>
-        </div>
-      </div>
+  const renderGenerating = () => {
+    const totalSteps = 3;
+    const currentStepIndex = generatingVariants.length;
+    
+    const stepsInfo = [
+      { name: "Standard Layout", desc: "Solid structure with clean grids & classic typography." },
+      { name: "Cosmic Slate Layout", desc: "Futuristic dark mode with subtle neon gradients." },
+      { name: "Ultra Minimalist Layout", desc: "Generous margins, stark contrasts & raw elegance." }
+    ];
 
-      <div className="absolute inset-0 z-0 flex items-center justify-center">
-        <motion.div 
-          animate={{ 
-            scale: [1, 1.2, 1],
-            rotate: [0, 90, 180, 270, 360],
-            borderRadius: ["20%", "50%", "20%"]
-          }}
-          transition={{ duration: 10, repeat: Infinity, ease: "linear" }}
-          className="w-96 h-96 bg-gradient-to-tr from-purple-600/20 via-blue-600/20 to-emerald-600/20 blur-[80px]" 
-        />
-      </div>
-      <div className="z-10 flex flex-col items-center text-center">
-        <div className="relative w-24 h-24 mb-12 flex items-center justify-center">
-          <div className="absolute inset-0 border-t-2 border-l-2 border-white rounded-full animate-spin" style={{ animationDuration: '3s' }} />
-          <div className="absolute inset-2 border-r-2 border-b-2 border-blue-400 rounded-full animate-spin" style={{ animationDuration: '2s', animationDirection: 'reverse' }} />
-          <Sparkles className="w-8 h-8 text-white animate-pulse" />
+    return (
+      <div className="min-h-screen bg-[#050505] text-white flex flex-col items-center justify-center relative overflow-hidden p-6 z-50">
+        {/* Ambient background glows */}
+        <div className="absolute inset-0 z-0 flex items-center justify-center">
+          <motion.div 
+            animate={{ 
+              scale: [1, 1.15, 1],
+              rotate: [0, 120, 240, 360],
+            }}
+            transition={{ duration: 15, repeat: Infinity, ease: "linear" }}
+            className="w-[500px] h-[500px] bg-gradient-to-tr from-purple-600/10 via-blue-600/10 to-emerald-600/10 blur-[100px] opacity-70" 
+          />
         </div>
-        <h2 className="text-5xl font-black tracking-tighter mb-6 bg-clip-text text-transparent bg-gradient-to-r from-white to-zinc-500">
-          Synthesizing Reality
-        </h2>
-        <p className="text-zinc-400 text-xl max-w-lg font-light">
-          Processing your prompt and answers to construct 3 distinct, production-ready interfaces...
-        </p>
+
+        {/* Logo Header */}
+        <div className="absolute top-0 left-0 right-0 p-6 flex justify-center z-50">
+          <div className="flex items-center gap-3 bg-white/5 backdrop-blur-xl px-4 py-2 rounded-full border border-white/10">
+            <Loader2 className="w-4 h-4 text-emerald-400 animate-spin" />
+            <span className="font-bold text-xs tracking-tighter uppercase font-mono">Synthesizing Designs</span>
+          </div>
+        </div>
+
+        <div className="z-10 w-full max-w-5xl flex flex-col items-center text-center mt-12">
+          <h2 className="text-4xl md:text-5xl font-black tracking-tighter mb-2 bg-clip-text text-transparent bg-gradient-to-r from-white via-zinc-200 to-zinc-500">
+            Generating Interfaces...
+          </h2>
+          <p className="text-emerald-400 font-mono text-xs tracking-wider uppercase mb-12 flex items-center gap-2">
+            <span>{generatingStep}</span>
+          </p>
+
+          {/* 3 Progressive Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6 w-full">
+            {[0, 1, 2].map((idx) => {
+              const isGenerated = idx < generatingVariants.length;
+              const isGeneratingNow = idx === generatingVariants.length;
+              const info = stepsInfo[idx];
+              const variant = generatingVariants[idx];
+
+              return (
+                <div 
+                  key={idx}
+                  className={`border rounded-2xl p-4 flex flex-col h-[300px] relative transition-all duration-500 overflow-hidden ${isGenerated ? 'border-emerald-500/20 bg-white/[0.01]' : isGeneratingNow ? 'border-purple-500/30 bg-purple-500/[0.01] shadow-[0_0_30px_rgba(168,85,247,0.05)] animate-pulse' : 'border-white/5 bg-zinc-950/25 opacity-30'}`}
+                >
+                  <div className="flex items-center justify-between mb-3 shrink-0">
+                    <span className="font-mono text-[10px] text-zinc-500 uppercase tracking-widest">Variant {idx + 1}</span>
+                    {isGenerated ? (
+                      <span className="bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 text-[9px] px-2 py-0.5 rounded-full font-mono font-bold tracking-wider uppercase">READY</span>
+                    ) : isGeneratingNow ? (
+                      <span className="bg-purple-500/10 text-purple-400 border border-purple-500/20 text-[9px] px-2 py-0.5 rounded-full font-mono font-bold tracking-wider uppercase animate-pulse flex items-center gap-1"><Loader2 className="w-2.5 h-2.5 animate-spin" /> SYNTHESIZING</span>
+                    ) : (
+                      <span className="bg-zinc-800/20 text-zinc-600 border border-white/5 text-[9px] px-2 py-0.5 rounded-full font-mono tracking-wider uppercase">PENDING</span>
+                    )}
+                  </div>
+
+                  <div className="flex-1 w-full flex items-center justify-center min-h-0">
+                    {isGenerated ? (
+                      <div className="w-full h-full relative rounded-xl border border-white/5 overflow-hidden bg-black/40">
+                        <div className="absolute inset-0 origin-top-left" style={{ width: '200%', height: '200%', transform: 'scale(0.5)' }}>
+                          <UIPreview html={variant.html} isEditable={false} />
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex flex-col items-center justify-center text-center gap-3 p-4 h-full">
+                        {isGeneratingNow ? (
+                          <Sparkles className="w-8 h-8 text-purple-400 animate-spin" style={{ animationDuration: '3s' }} />
+                        ) : (
+                          <div className="w-8 h-8 rounded-full border border-white/10 flex items-center justify-center text-zinc-600 font-mono text-xs">
+                            {idx + 1}
+                          </div>
+                        )}
+                        <div>
+                          <h4 className="text-sm font-bold text-zinc-300">{info.name}</h4>
+                          <p className="text-zinc-500 text-[10px] max-w-[200px] mx-auto mt-1 leading-relaxed">{info.desc}</p>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderPreview = () => {
     if (variants.length === 0) return null;
@@ -1071,7 +1550,7 @@ const App: React.FC = () => {
             <div className="flex items-center gap-2 shrink-0">
               <button 
                 onClick={() => {
-                  setBuilderHtml(currentVariant.html);
+                  resetBuilderHtml(currentVariant.html);
                   setView(AppView.BUILDER);
                 }} 
                 className="px-5 py-2 rounded-full text-sm font-bold bg-white text-black hover:bg-zinc-200 transition-colors flex items-center gap-2"
@@ -1083,6 +1562,35 @@ const App: React.FC = () => {
         </div>
       </div>
     );
+  };
+
+  const applyPaletteToUI = async (palette: ColorPalette) => {
+    setIsChatGenerating(true);
+    setSidebarTab('chat');
+    const description = `Apply the ${palette.name} color palette. Swatches: ${palette.swatches.map(s => `${s.role} (${s.hex})`).join(', ')}. Rewrite colors of all backgrounds, texts, borders and accents to strictly match this palette style.`;
+    
+    // Append user message
+    const userMsgId = Date.now().toString();
+    setChatMessages(prev => [...prev, { id: userMsgId, role: 'user', content: `Please style the interface using the ${palette.name} color palette.` }]);
+    
+    try {
+      let streamedHtml = "";
+      const result = await modifyUI(builderHtml, description, (chunk) => {
+        streamedHtml += chunk;
+        setBuilderHtml(streamedHtml);
+      });
+      const updatedHtml = result.data;
+      setBuilderHtml(updatedHtml);
+      
+      setChatMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: 'ai', content: `I have styled your interface with the **${palette.name}** color palette! All corresponding background gradients, visual cards, text styles, and highlights have been updated.` }]);
+      
+      triggerAutoSave(updatedHtml, `Applied ${palette.name} Palette`);
+    } catch (err: any) {
+      console.error("Failed to apply palette:", err);
+      setChatMessages(prev => [...prev, { id: (Date.now() + 1).toString(), role: 'ai', content: `Error applying color palette: ${err.message || err}` }]);
+    } finally {
+      setIsChatGenerating(false);
+    }
   };
 
   const handleChatSubmit = async (e: React.FormEvent) => {
@@ -1098,13 +1606,14 @@ const App: React.FC = () => {
       let streamedHtml = "";
       const result = await modifyUI(builderHtml, userMsg, (chunk) => {
         streamedHtml += chunk;
-        setBuilderHtml(streamedHtml);
+        setBuilderHtml(streamedHtml, true);
       });
       const updatedHtml = result.data;
       const usage = result.usage;
       const cost = calculateCost(usage);
 
       setBuilderHtml(updatedHtml);
+      triggerAutoSave(updatedHtml, `AI Edit: ${userMsg.slice(0, 30)}...`);
       setChatMessages(prev => [...prev, { id: Date.now().toString(), role: 'ai', content: 'I have updated the design based on your request.' }]);
 
       if (user) {
@@ -1174,6 +1683,27 @@ const App: React.FC = () => {
             >
               <ChevronLeft className="w-4 h-4" /> Back to Variants
             </button>
+            <div className="h-4 w-px bg-zinc-800" />
+            <div className="flex items-center gap-1 bg-white/5 border border-white/10 p-0.5 rounded-full shrink-0">
+              <button
+                type="button"
+                onClick={undo}
+                disabled={!canUndo}
+                className="p-1.5 rounded-full text-zinc-400 hover:text-white hover:bg-white/5 disabled:opacity-25 disabled:cursor-not-allowed transition-all flex items-center justify-center cursor-pointer"
+                title="Undo (Ctrl + Z)"
+              >
+                <Undo2 className="w-3.5 h-3.5" />
+              </button>
+              <button
+                type="button"
+                onClick={redo}
+                disabled={!canRedo}
+                className="p-1.5 rounded-full text-zinc-400 hover:text-white hover:bg-white/5 disabled:opacity-25 disabled:cursor-not-allowed transition-all flex items-center justify-center cursor-pointer"
+                title="Redo (Ctrl + Y)"
+              >
+                <Redo2 className="w-3.5 h-3.5" />
+              </button>
+            </div>
           </div>
           <div className="flex items-center gap-4">
             <button 
@@ -1229,41 +1759,56 @@ const App: React.FC = () => {
         </div>
       </div>
 
-      {/* Modern Dual-Tab Sidebar */}
+      {/* Modern Quad-Tab Sidebar */}
       <div id="chat-sidebar" className="w-96 border-l border-white/10 bg-[#0a0a0a] flex flex-col h-full shrink-0 relative">
-        {/* Sleek Dual Tab Headers */}
+        {/* Sleek Quad Tab Headers */}
         <div className="flex border-b border-white/10 bg-black/40">
           <button
+            type="button"
             onClick={() => setSidebarTab('chat')}
-            className={`flex-1 py-3.5 text-[10px] font-black uppercase tracking-widest transition-all border-b-2 flex items-center justify-center gap-1.5 cursor-pointer ${sidebarTab === 'chat' ? 'border-emerald-500 text-white bg-white/[0.02]' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}
+            className={`flex-1 py-3 text-[9px] font-black uppercase tracking-wider transition-all border-b-2 flex flex-col items-center justify-center gap-1 cursor-pointer ${sidebarTab === 'chat' ? 'border-emerald-500 text-white bg-white/[0.02]' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}
+            title="AI Chat"
           >
             <MessageSquare className="w-3.5 h-3.5" />
-            AI Assistant
+            <span>Chat</span>
           </button>
           
           <button
+            type="button"
             onClick={() => {
-              if (isManualEditing) {
-                setSidebarTab('editor');
-              } else {
-                // Instantly activate manual edit mode when switching tabs
-                if (!isPro && totalGenerations >= 6) {
-                  setShowUpgradeModal(true);
-                } else {
-                  setIsManualEditing(true);
-                  setSidebarTab('editor');
-                }
-              }
+              setIsManualEditing(true);
+              setSidebarTab('editor');
             }}
-            className={`flex-1 py-3.5 text-[10px] font-black uppercase tracking-widest transition-all border-b-2 flex items-center justify-center gap-1.5 cursor-pointer ${sidebarTab === 'editor' ? 'border-emerald-500 text-white bg-white/[0.02]' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}
+            className={`flex-1 py-3 text-[9px] font-black uppercase tracking-wider transition-all border-b-2 flex flex-col items-center justify-center gap-1 cursor-pointer ${sidebarTab === 'editor' ? 'border-emerald-500 text-white bg-white/[0.02]' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}
+            title="Manual Styles"
           >
             <Sparkles className="w-3.5 h-3.5" />
-            Manual Editor
+            <span>Edit</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSidebarTab('palette')}
+            className={`flex-1 py-3 text-[9px] font-black uppercase tracking-wider transition-all border-b-2 flex flex-col items-center justify-center gap-1 cursor-pointer ${sidebarTab === 'palette' ? 'border-emerald-500 text-white bg-white/[0.02]' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}
+            title="AI Color Palette"
+          >
+            <Palette className="w-3.5 h-3.5" />
+            <span>Palette</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => setSidebarTab('history')}
+            className={`flex-1 py-3 text-[9px] font-black uppercase tracking-wider transition-all border-b-2 flex flex-col items-center justify-center gap-1 cursor-pointer ${sidebarTab === 'history' ? 'border-emerald-500 text-white bg-white/[0.02]' : 'border-transparent text-zinc-500 hover:text-zinc-300'}`}
+            title="Version History"
+          >
+            <History className="w-3.5 h-3.5" />
+            <span>History</span>
           </button>
         </div>
         
-        {/* Lock Overlay for Free tier >= 6 generations */}
-        {!isPro && totalGenerations >= 6 ? (
+        {/* Lock Overlay for Free tier >= 6 generations (locks only chat/editor) */}
+        {!isPro && totalGenerations >= 6 && (sidebarTab === 'chat' || sidebarTab === 'editor') ? (
           <div className="absolute inset-x-0 bottom-0 top-14 bg-black/95 backdrop-blur-md z-40 flex flex-col items-center justify-center p-6 text-center">
             <div className="w-14 h-14 bg-zinc-900 border border-white/10 rounded-2xl flex items-center justify-center mb-6 shadow-2xl">
               <Sparkles className="w-6 h-6 text-yellow-500 animate-pulse" />
@@ -1331,7 +1876,7 @@ const App: React.FC = () => {
               </form>
             </div>
           </>
-        ) : (
+        ) : sidebarTab === 'editor' ? (
           <div className="flex-1 overflow-y-auto p-5 space-y-6 flex flex-col font-sans">
             {!selectedElement ? (
               <div className="flex-1 flex flex-col items-center justify-center text-center p-4">
@@ -1651,6 +2196,120 @@ const App: React.FC = () => {
               </div>
             )}
           </div>
+        ) : sidebarTab === 'palette' ? (
+          <div className="flex-1 overflow-y-auto p-4 space-y-6 flex flex-col font-sans">
+            <div className="flex items-center justify-between shrink-0">
+              <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
+                <Palette className="w-4 h-4 text-emerald-400" />
+                <span>AI Style Palettes</span>
+              </h4>
+              <span className="text-[10px] font-mono text-zinc-500 uppercase bg-white/5 border border-white/10 px-2 py-0.5 rounded-full">
+                {palettes.length} Palettes
+              </span>
+            </div>
+
+            <button
+              type="button"
+              disabled={isGeneratingPalette}
+              onClick={async () => {
+                setIsGeneratingPalette(true);
+                try {
+                  const res = await generatePalette(builderHtml);
+                  setPalettes(prev => [...res.data, ...prev]);
+                } catch (err: any) {
+                  console.error("Palette generation failed:", err);
+                  alert("Palette generation failed: " + err.message);
+                } finally {
+                  setIsGeneratingPalette(false);
+                }
+              }}
+              className="w-full bg-white text-black hover:bg-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed py-3 px-4 rounded-xl text-xs font-bold transition-all hover:scale-[1.02] active:scale-[0.98] cursor-pointer flex items-center justify-center gap-2 shadow-lg shrink-0"
+            >
+              {isGeneratingPalette ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                  <span>Synthesizing Palettes...</span>
+                </>
+              ) : (
+                <>
+                  <Sparkles className="w-4 h-4 text-purple-600 animate-pulse" />
+                  <span>Generate New Palettes with AI</span>
+                </>
+              )}
+            </button>
+
+            <div className="space-y-4 flex-1 overflow-y-auto pr-0.5">
+              {palettes.map((p) => (
+                <div key={p.id} className="bg-white/[0.02] border border-white/5 hover:border-white/10 rounded-xl p-4 flex flex-col gap-3 transition-colors">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-bold text-zinc-200">{p.name}</span>
+                  </div>
+                  
+                  {/* Visual swatches row */}
+                  <div className="grid grid-cols-5 gap-1 bg-black/40 p-1.5 rounded-lg border border-white/5">
+                    {p.swatches.map((swatch, sIdx) => (
+                      <div key={sIdx} className="flex flex-col items-center gap-1">
+                        <div 
+                          className="w-full aspect-square rounded-md shadow-sm border border-white/10 relative group/swatch"
+                          style={{ backgroundColor: swatch.hex }}
+                          title={`${swatch.role}: ${swatch.hex}`}
+                        >
+                          <div className="absolute inset-0 flex items-center justify-center bg-black/70 opacity-0 hover:opacity-100 transition-opacity rounded-md">
+                            <span className="text-[8px] font-mono font-bold text-white uppercase">{swatch.role.slice(0, 3)}</span>
+                          </div>
+                        </div>
+                        <span className="text-[8px] font-mono text-zinc-500 font-bold select-all">{swatch.hex}</span>
+                      </div>
+                    ))}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => applyPaletteToUI(p)}
+                    className="w-full bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 py-2 rounded-lg text-[10px] font-bold tracking-wide uppercase transition-colors cursor-pointer"
+                  >
+                    Apply Palette to Design
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : (
+          <div className="flex-1 overflow-y-auto p-4 space-y-4 flex flex-col font-sans">
+            <div className="flex items-center justify-between shrink-0">
+              <h4 className="text-sm font-bold text-white flex items-center gap-1.5">
+                <History className="w-4 h-4 text-emerald-400" />
+                <span>Version Timeline</span>
+              </h4>
+              <span className="text-[10px] font-mono text-zinc-500 uppercase bg-white/5 border border-white/10 px-2 py-0.5 rounded-full">
+                {versionHistory.length} Saved
+              </span>
+            </div>
+
+            {versionHistory.length === 0 ? (
+              <div className="flex-1 flex flex-col items-center justify-center text-center p-4">
+                <div className="w-10 h-10 rounded-full bg-zinc-900 border border-white/5 flex items-center justify-center mb-3 text-zinc-500">
+                  <History className="w-5 h-5" />
+                </div>
+                <p className="text-zinc-500 text-xs">No version history recorded yet.</p>
+                <p className="text-zinc-600 text-[10px] max-w-[200px] mt-1">Make any edits or layout selections to auto-save variations.</p>
+              </div>
+            ) : (
+              <div className="space-y-3 flex-1 overflow-y-auto pr-0.5">
+                {versionHistory.map((version) => (
+                  <VersionItem 
+                    key={version.id}
+                    version={version}
+                    onRestore={(html, name) => {
+                      setBuilderHtml(html);
+                      triggerAutoSave(html, `Restored point: ${name}`);
+                    }}
+                    onUpdateName={updateVersionName}
+                  />
+                ))}
+              </div>
+            )}
+          </div>
         )}
       </div>
     </div>
@@ -1798,7 +2457,7 @@ const App: React.FC = () => {
                       key={design.id} 
                       className="bg-white/5 border border-white/10 rounded-2xl p-6 hover:bg-white/10 transition-colors cursor-pointer group flex flex-col h-full animate-fadeIn"
                       onClick={() => {
-                        setBuilderHtml(design.html);
+                        resetBuilderHtml(design.html);
                         setIsManualEditing(false);
                         setChatMessages([
                           { id: 'welcome', role: 'ai', content: `Restored saved design: "${design.name}".` }

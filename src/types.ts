@@ -70,3 +70,24 @@ export interface SavedDesign {
   createdAt: string;
 }
 
+export interface ProjectVersion {
+  id: string;
+  projectId: string;
+  name: string;
+  html: string;
+  createdAt: string;
+}
+
+export interface ColorSwatch {
+  role: 'primary' | 'accent' | 'background' | 'surface' | 'text';
+  hex: string;
+}
+
+export interface ColorPalette {
+  id?: string;
+  name: string;
+  colors: ColorSwatch[];
+  swatches?: ColorSwatch[];
+}
+
+

@@ -1,4 +1,4 @@
-import { UIVariant, UsageMetadata, DesignSuggestion } from "../types.ts";
+import { UIVariant, UsageMetadata, DesignSuggestion, ColorPalette } from "../types.ts";
 import { apiFetch } from "./api.ts";
 
 export interface GenerationResult<T> {
@@ -28,12 +28,13 @@ export async function generateFollowUpQuestions(prompt: string): Promise<Generat
 export async function generateUIVariants(
   prompt: string,
   questions: string[] = [],
-  answers: string[] = []
+  answers: string[] = [],
+  referenceImage?: { base64: string; mimeType: string } | null
 ): Promise<GenerationResult<UIVariant[]>> {
   const preferred = getPreferredProvider();
   const response = await apiFetch("/api/ai/ui-variants", {
     method: "POST",
-    body: JSON.stringify({ prompt, questions, answers, preferred }),
+    body: JSON.stringify({ prompt, questions, answers, preferred, referenceImage }),
   });
 
   if (!response.ok) {
@@ -43,6 +44,42 @@ export async function generateUIVariants(
 
   return response.json();
 }
+
+export async function generateSingleUIVariant(
+  prompt: string,
+  questions: string[] = [],
+  answers: string[] = [],
+  variantIndex: number,
+  referenceImage?: { base64: string; mimeType: string } | null
+): Promise<GenerationResult<UIVariant>> {
+  const preferred = getPreferredProvider();
+  const response = await apiFetch("/api/ai/ui-variant-single", {
+    method: "POST",
+    body: JSON.stringify({ prompt, questions, answers, variantIndex, preferred, referenceImage }),
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || `Failed to generate single UI variant: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
+export async function generatePalette(currentHtml: string): Promise<GenerationResult<ColorPalette[]>> {
+  const response = await apiFetch("/api/ai/generate-palette", {
+    method: "POST",
+    body: JSON.stringify({ currentHtml }),
+  });
+
+  if (!response.ok) {
+    const errData = await response.json().catch(() => ({}));
+    throw new Error(errData.error || `Failed to generate palette: ${response.statusText}`);
+  }
+
+  return response.json();
+}
+
 
 export async function modifyUI(
   currentHtml: string,
